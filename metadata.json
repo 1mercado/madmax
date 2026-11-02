@@ -1,0 +1,6 @@
+{
+  "name": "DigiCash",
+  "description": "Modern Financial Technology Mobile App with GCash and Maya features, rewards, unilevel compensation system, and tier upgrades.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

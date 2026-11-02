@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@layer utilities {
+  /* Hide scrollbar for Chrome, Safari and Opera */
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  /* Hide scrollbar for IE, Edge and Firefox */
+  .scrollbar-none {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+}
+
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: manipulation;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+#root {
+  width: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Default Dark Cyberpunk Theme */
+html.dark body, body {
+  background-color: #020712;
+  background-image: 
+    radial-gradient(at 10% 20%, rgba(0, 229, 255, 0.14) 0px, transparent 50%),
+    radial-gradient(at 90% 15%, rgba(0, 245, 160, 0.12) 0px, transparent 50%),
+    radial-gradient(at 50% 90%, rgba(124, 77, 255, 0.12) 0px, transparent 50%),
+    linear-gradient(180deg, #020712 0%, #06162e 50%, #010610 100%);
+  background-attachment: fixed;
+  color: #ffffff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* High-Contrast Light Theme */
+html.light body,
+[data-theme="light"] body {
+  background-color: #f1f5f9;
+  background-image: 
+    radial-gradient(at 15% 15%, rgba(2, 132, 199, 0.10) 0px, transparent 55%),
+    radial-gradient(at 85% 20%, rgba(5, 150, 105, 0.09) 0px, transparent 50%),
+    radial-gradient(at 50% 90%, rgba(79, 70, 229, 0.08) 0px, transparent 55%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f6 50%, #e2e8f0 100%);
+  background-attachment: fixed;
+  color: #090d16;
+}
+
+/* High Contrast Light overrides */
+html.light .text-white {
+  color: #090d16 !important;
+}
+
+html.light .text-slate-300,
+html.light .text-slate-400 {
+  color: #334155 !important;
+}
+
+html.light .bg-[#020712],
+html.light .bg-[#01142f],
+html.light .bg-[#021e44],
+html.light .bg-[#011736],
+html.light .bg-[#061c38],
+html.light .bg-[#071933],
+html.light .bg-[#081f3c],
+html.light .bg-[#081c38],
+html.light .bg-[#04142b],
+html.light .bg-[#091f3a],
+html.light .bg-[#0a2240] {
+  background-color: #ffffff !important;
+}
+
+html.light .border-\[\#00e5ff\]\/20,
+html.light .border-\[\#00e5ff\]\/30,
+html.light .border-\[\#00e5ff\]\/40,
+html.light .border-\[\#00e5ff\]\/50 {
+  border-color: #0284c7 !important;
+}
+
+html.light .border-white\/10,
+html.light .border-white\/5 {
+  border-color: #cbd5e1 !important;
+}
+
+/* Safe area padding utilities */
+.safe-top {
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0.75rem));
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 1rem));
+}

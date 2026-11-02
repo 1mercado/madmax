@@ -1,0 +1,26 @@
+{
+  "short_name": "DigiCash",
+  "name": "DigiCash Worldwide",
+  "description": "High-end Cyberpunk Fintech Mobile Wallet with QR Ph, Phone Auth, MPIN, and Unilevel Commissions",
+  "icons": [
+    {
+      "src": "/assets/digicash_logo.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/digicash_logo_transparent.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020712",
+  "theme_color": "#00e5ff",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone", "minimal-ui", "window-controls-overlay"],
+  "orientation": "portrait-primary",
+  "scope": "/"
+}
