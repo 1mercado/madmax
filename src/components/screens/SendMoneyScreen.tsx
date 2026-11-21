@@ -17,7 +17,7 @@ import { lookupRecipient, RecipientLookupResult } from '../../services/fintechAp
 type TransferChannel = 'DigiCash' | 'GCash' | 'Maya' | 'GoTyme' | 'Bank';
 
 export const SendMoneyScreen: React.FC = () => {
-  const { userProfile, sendMoney, transactions, navigateTo } = useDigiCash();
+  const { userProfile, sendMoney, transactions, navigateTo, kycLimits, complianceUsage } = useDigiCash();
 
   const [activeTab, setActiveTab] = useState<TransferChannel>('DigiCash');
   const [recipient, setRecipient] = useState('');
@@ -195,11 +195,16 @@ export const SendMoneyScreen: React.FC = () => {
             </strong>
           </span>
         </div>
-        <div>
-          <span className="text-slate-400 mr-1">Balance:</span>
-          <span className="font-bold text-[#00f5a0]">
-            ₱{userProfile.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
+        <div className="text-right tabular-nums">
+          <div>
+            <span className="text-slate-400 mr-1">Balance:</span>
+            <span className="font-bold text-[#00f5a0]">
+              ₱{userProfile.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
+          <div className="text-[10px] text-slate-400">
+            Daily KYC left: ₱{complianceUsage.dailyRemaining.toLocaleString()} / ₱{kycLimits.dailyOutgoingLimit.toLocaleString()}
+          </div>
         </div>
       </div>
 
@@ -350,8 +355,17 @@ export const SendMoneyScreen: React.FC = () => {
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-xs text-rose-300 font-semibold">
-              {error}
+            <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-xs text-rose-300 font-semibold space-y-2">
+              <div>{error}</div>
+              {(error.toLowerCase().includes('kyc') || error.toLowerCase().includes('compliance') || error.toLowerCase().includes('frozen')) && (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('KYC_COMPLIANCE')}
+                  className="text-[11px] font-bold text-[#00e5ff] underline"
+                >
+                  Open KYC & AML Compliance Center →
+                </button>
+              )}
             </div>
           )}
 

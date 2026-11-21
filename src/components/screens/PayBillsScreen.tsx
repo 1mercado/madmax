@@ -29,7 +29,7 @@ import {
 } from '../../services/fintechApi';
 
 export const PayBillsScreen: React.FC = () => {
-  const { billers, userProfile, payBill, navigateTo } = useDigiCash();
+  const { billers, userProfile, payBill, navigateTo, kycLimits, complianceUsage } = useDigiCash();
 
   const categories = ['All', 'Electricity', 'Water', 'Internet', 'Cable TV', 'Government', 'Loans'];
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -320,9 +320,14 @@ export const PayBillsScreen: React.FC = () => {
             </div>
 
             <form onSubmit={handlePay} className="space-y-3.5">
-              <div className="flex justify-between text-xs text-slate-400 bg-[#061427] p-2.5 rounded-xl">
-                <span>Available Wallet Balance:</span>
-                <span className="font-bold text-[#00f5a0]">
+              <div className="flex justify-between text-xs text-slate-400 bg-[#061427] p-2.5 rounded-xl tabular-nums">
+                <div>
+                  <div>Available Balance</div>
+                  <div className="text-[10px] text-slate-400">
+                    Daily KYC Left: ₱{complianceUsage.dailyRemaining.toLocaleString()} / ₱{kycLimits.dailyOutgoingLimit.toLocaleString()}
+                  </div>
+                </div>
+                <span className="font-bold text-[#00f5a0] self-center">
                   ₱{userProfile.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
               </div>
@@ -416,7 +421,23 @@ export const PayBillsScreen: React.FC = () => {
                 </div>
               </div>
 
-              {error && <p className="text-xs text-[#ff5252] font-semibold">{error}</p>}
+              {error && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-xs text-rose-300 font-semibold space-y-1.5">
+                  <div>{error}</div>
+                  {(error.toLowerCase().includes('kyc') || error.toLowerCase().includes('compliance') || error.toLowerCase().includes('frozen')) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveBiller(null);
+                        navigateTo('KYC_COMPLIANCE');
+                      }}
+                      className="text-[11px] font-bold text-[#00e5ff] underline"
+                    >
+                      Open KYC & AML Compliance Center →
+                    </button>
+                  )}
+                </div>
+              )}
 
               <div className="flex gap-2.5 pt-2">
                 <button

@@ -9,6 +9,7 @@ import {
   LogOut,
   Moon,
   Shield,
+  ShieldCheck,
   Smartphone,
   Star,
   Sun,
@@ -37,6 +38,8 @@ export const ProfileScreen: React.FC = () => {
     pushSettings,
     unreadNotificationCount,
     setIsNotificationCenterOpen,
+    kycProfile,
+    kycLimits,
   } = useDigiCash();
 
   const [showAccountModal, setShowAccountModal] = useState(false);
@@ -110,6 +113,23 @@ export const ProfileScreen: React.FC = () => {
             <div>
               <div className="text-xs font-semibold text-white">Security & PIN</div>
               <div className="text-[11px] text-slate-400">6-Digit MPIN & Account Protection</div>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-400" />
+        </div>
+
+        {/* KYC & AML Compliance Center */}
+        <div
+          onClick={() => navigateTo('KYC_COMPLIANCE')}
+          className="p-3.5 flex items-center justify-between cursor-pointer hover:bg-white/5 rounded-xl transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="w-5 h-5 text-[#00f5a0]" />
+            <div>
+              <div className="text-xs font-semibold text-white">KYC & AML Compliance Center</div>
+              <div className="text-[11px] text-slate-400 tabular-nums">
+                {kycLimits.label} · {kycProfile.status.replace('_', ' ')} · AML Risk {kycProfile.riskLevel}
+              </div>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-400" />

@@ -173,7 +173,8 @@ export type AppDestination =
   | 'REFERRALS'
   | 'VIP_TIERS'
   | 'BUILDER_UPGRADE'
-  | 'TRANSACTIONS_FULL';
+  | 'TRANSACTIONS_FULL'
+  | 'KYC_COMPLIANCE';
 
 export type BottomNavTab = 'HOME' | 'TRANSACTIONS' | 'SERVICES' | 'PROFILE';
 
@@ -218,4 +219,171 @@ export interface PushNotificationSettings {
   backgroundSync: boolean;
   soundAlerts: boolean;
 }
+
+// ============================================================================
+// KYC (Know Your Customer) & AML (Anti-Money Laundering) Infrastructure Types
+// Aligned with BSP Circulars 950 / 1022 and AMLA (RA 9160 as amended)
+// ============================================================================
+
+export type KycTier = 'TIER_1_BASIC' | 'TIER_2_VERIFIED' | 'TIER_3_ENHANCED';
+
+export type KycStatus =
+  | 'UNVERIFIED'
+  | 'PENDING_REVIEW'
+  | 'VERIFIED'
+  | 'REJECTED'
+  | 'ACTION_REQUIRED';
+
+export type GovernmentIdType =
+  | 'PHILSYS_NATIONAL_ID'
+  | 'PASSPORT'
+  | 'DRIVERS_LICENSE'
+  | 'UMID'
+  | 'PRC_ID'
+  | 'POSTAL_ID'
+  | 'VOTERS_ID';
+
+export type AmlRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+export type AmlAlertType =
+  | 'CTR_THRESHOLD'
+  | 'STR_STRUCTURING'
+  | 'VELOCITY_SPIKE'
+  | 'SANCTIONS_MATCH'
+  | 'PEP_FLAG'
+  | 'KYC_LIMIT_EXCEEDED'
+  | 'ACCOUNT_FROZEN';
+
+export type AmlCaseStatus =
+  | 'OPEN'
+  | 'UNDER_REVIEW'
+  | 'CLEARED'
+  | 'FILED_AMLC'
+  | 'ESCALATED';
+
+export interface KycTierLimits {
+  tier: KycTier;
+  label: string;
+  singleTransactionLimit: number;
+  dailyOutgoingLimit: number;
+  monthlyOutgoingLimit: number;
+  maxWalletBalance: number;
+  features: string[];
+}
+
+export interface SanctionsScreeningMatch {
+  listName: 'OFAC SDN' | 'UNSC Consolidated' | 'AMLC PH Watchlist' | 'PEP Registry';
+  matchedTerm: string;
+  confidence: number;
+  category: 'SANCTIONS' | 'TERRORISM_FINANCING' | 'PEP' | 'ADVERSE_MEDIA';
+}
+
+export interface SanctionsScreeningResult {
+  screenedName: string;
+  screenedAt: string;
+  status: 'CLEAR' | 'REVIEW_REQUIRED' | 'BLOCKED';
+  riskScore: number;
+  riskLevel: AmlRiskLevel;
+  matches: SanctionsScreeningMatch[];
+  screeningRef: string;
+}
+
+export interface KycProfile {
+  phone: string;
+  tier: KycTier;
+  status: KycStatus;
+  fullLegalName: string;
+  dateOfBirth?: string;
+  nationality?: string;
+  residentialAddress?: string;
+  city?: string;
+  occupation?: string;
+  sourceOfFunds?: string;
+  idType?: GovernmentIdType;
+  maskedIdNumber?: string;
+  idDocumentHash?: string;
+  selfieDocumentHash?: string;
+  hasFrontId: boolean;
+  hasBackId: boolean;
+  hasSelfieLiveness: boolean;
+  livenessScore?: number;
+  isPep: boolean;
+  pepDetails?: string;
+  riskScore: number;
+  riskLevel: AmlRiskLevel;
+  screeningStatus: 'NOT_SCREENED' | 'CLEAR' | 'REVIEW_REQUIRED' | 'BLOCKED';
+  screeningRef?: string;
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewerNotes?: string;
+  isFrozen: boolean;
+  frozenReason?: string;
+}
+
+export interface AmlAlert {
+  id: string;
+  accountPhone: string;
+  accountName: string;
+  type: AmlAlertType;
+  severity: AmlRiskLevel;
+  status: AmlCaseStatus;
+  title: string;
+  description: string;
+  amount?: number;
+  transactionRef?: string;
+  counterparty?: string;
+  ruleTriggered: string;
+  amlcFilingRef?: string;
+  reviewerNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComplianceAuditEntry {
+  id: string;
+  timestamp: string;
+  actorPhone: string;
+  actorRole: string;
+  action: string;
+  targetPhone?: string;
+  details: string;
+}
+
+export interface ComplianceProfileResponse {
+  success: boolean;
+  profile: KycProfile;
+  limits: KycTierLimits;
+  allTiers: Record<KycTier, KycTierLimits>;
+  usage: {
+    dailyOutgoingUsed: number;
+    monthlyOutgoingUsed: number;
+    dailyRemaining: number;
+    monthlyRemaining: number;
+  };
+  recentAlerts: AmlAlert[];
+}
+
+export interface AdminComplianceOverview {
+  success: boolean;
+  metrics: {
+    totalAccounts: number;
+    pendingKycCount: number;
+    verifiedKycCount: number;
+    openAmlAlerts: number;
+    ctrCount: number;
+    strCount: number;
+    frozenAccountsCount: number;
+  };
+  kycApplications: KycProfile[];
+  amlAlerts: AmlAlert[];
+  frozenAccounts: Array<{
+    phone: string;
+    reason: string;
+    frozenBy: string;
+    frozenAt: string;
+  }>;
+  auditLog: ComplianceAuditEntry[];
+}
+
 

@@ -9,6 +9,7 @@ import {
   Receipt,
   Rocket,
   Send,
+  ShieldCheck,
   Sliders,
   Star,
   Users,
@@ -81,6 +82,13 @@ export const ServicesHubScreen: React.FC = () => {
               title: 'Savings Vault (6.0% P.A.)',
               subtitle: 'Goal-based savings with visual progress tracking',
               action: () => navigateTo('SAVINGS_VAULT'),
+            },
+            {
+              icon: ShieldCheck,
+              color: '#00e5ff',
+              title: 'KYC Identity & AML Compliance Center',
+              subtitle: 'eKYC ID verification, BSP tier limits & watchlist screening',
+              action: () => navigateTo('KYC_COMPLIANCE'),
             },
           ].map((item, idx) => {
             const Icon = item.icon;

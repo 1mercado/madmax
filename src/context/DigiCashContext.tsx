@@ -1,15 +1,23 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import {
+  AdminComplianceOverview,
+  AmlAlert,
+  AmlCaseStatus,
   AppDestination,
   AppNotification,
   Biller,
   BottomNavTab,
   BudgetCategory,
+  KycProfile,
+  KycStatus,
+  KycTier,
+  KycTierLimits,
   NetworkMember,
   PushNotificationSettings,
   RegisteredAccount,
   RewardItem,
+  SanctionsScreeningResult,
   SavingsGoal,
   SimulationResult,
   SplitBreakdown,
@@ -61,6 +69,17 @@ import {
   syncBackgroundWatchWithSw,
   triggerSwBackgroundCheck,
 } from '../services/pushNotificationService';
+import {
+  exportAmlcReportApi,
+  fetchAdminComplianceOverviewApi,
+  fetchComplianceProfileApi,
+  KycSubmissionPayload,
+  reviewKycApplicationApi,
+  screenEntityComplianceApi,
+  submitKycApplicationApi,
+  toggleAccountFreezeApi,
+  updateAmlCaseApi,
+} from '../services/complianceApi';
 
 interface DigiCashContextType {
   userProfile: UserProfile;
@@ -156,6 +175,53 @@ interface DigiCashContextType {
     category: 'INCOMING_TRANSFER' | 'BILL_PAYMENT',
     delayMs?: number
   ) => void;
+  // KYC & AML Compliance Infrastructure
+  kycProfile: KycProfile;
+  kycLimits: KycTierLimits;
+  allKycTiers: Record<KycTier, KycTierLimits>;
+  complianceUsage: {
+    dailyOutgoingUsed: number;
+    monthlyOutgoingUsed: number;
+    dailyRemaining: number;
+    monthlyRemaining: number;
+  };
+  userComplianceAlerts: AmlAlert[];
+  adminComplianceOverview: AdminComplianceOverview | null;
+  isComplianceLoading: boolean;
+  refreshComplianceData: () => Promise<void>;
+  submitKycApplication: (
+    payload: Omit<KycSubmissionPayload, 'phone'>
+  ) => Promise<{
+    success: boolean;
+    profile?: KycProfile;
+    screening?: SanctionsScreeningResult;
+    message?: string;
+    error?: string;
+  }>;
+  screenEntityCompliance: (params: {
+    fullName: string;
+    nationality?: string;
+    dateOfBirth?: string;
+  }) => Promise<{ success: boolean; result?: SanctionsScreeningResult; error?: string }>;
+  reviewKycApplication: (params: {
+    targetPhone: string;
+    decision: KycStatus;
+    approvedTier?: KycTier;
+    reviewerNotes?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  updateAmlCase: (params: {
+    alertId: string;
+    status: AmlCaseStatus;
+    reviewerNotes?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  toggleAccountFreeze: (params: {
+    targetPhone: string;
+    freeze: boolean;
+    reason?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  exportAmlcReport: (
+    format?: 'json' | 'csv'
+  ) => Promise<{ success: boolean; filename?: string; content?: string; mimeType?: string; error?: string }>;
 }
 
 const DigiCashContext = createContext<DigiCashContextType | undefined>(undefined);
@@ -327,6 +393,81 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     null | 'INCOMING_TRANSFER' | 'BILL_PAYMENT'
   >(null);
   const lastPolledTimestampRef = React.useRef<number>(Date.now());
+
+  // Default BSP Circular 950 / 1022 KYC Tier Limits
+  const DEFAULT_KYC_TIERS: Record<KycTier, KycTierLimits> = {
+    TIER_1_BASIC: {
+      tier: 'TIER_1_BASIC',
+      label: 'Tier 1 · Basic Account',
+      singleTransactionLimit: 10000,
+      dailyOutgoingLimit: 10000,
+      monthlyOutgoingLimit: 50000,
+      maxWalletBalance: 50000,
+      features: [
+        'Basic wallet cash-in & QR Ph receive',
+        'Send money & pay bills up to ₱10,000/day',
+        'Monthly outgoing cap of ₱50,000',
+      ],
+    },
+    TIER_2_VERIFIED: {
+      tier: 'TIER_2_VERIFIED',
+      label: 'Tier 2 · Full eKYC Verified',
+      singleTransactionLimit: 100000,
+      dailyOutgoingLimit: 100000,
+      monthlyOutgoingLimit: 500000,
+      maxWalletBalance: 500000,
+      features: [
+        'Full InstaPay & PESONet bank disbursements',
+        'Up to ₱100,000 daily / ₱500,000 monthly outgoing',
+        'Priority BancNet billers & high-yield Savings Vault',
+      ],
+    },
+    TIER_3_ENHANCED: {
+      tier: 'TIER_3_ENHANCED',
+      label: 'Tier 3 · Enhanced Due Diligence (EDD)',
+      singleTransactionLimit: 500000,
+      dailyOutgoingLimit: 500000,
+      monthlyOutgoingLimit: 2000000,
+      maxWalletBalance: 5000000,
+      features: [
+        'High-volume PESONet & business treasury transfers',
+        'Up to ₱500,000 daily / ₱2,000,000 monthly outgoing',
+        'Dedicated AMLC CTR auto-filing & institutional clearing',
+      ],
+    },
+  };
+
+  const [allKycTiers, setAllKycTiers] = useState<Record<KycTier, KycTierLimits>>(DEFAULT_KYC_TIERS);
+  const [kycProfile, setKycProfile] = useState<KycProfile>(() => ({
+    phone: userProfile.id,
+    tier: userProfile.id === '09171234567' ? 'TIER_2_VERIFIED' : 'TIER_1_BASIC',
+    status: userProfile.id === '09171234567' ? 'VERIFIED' : 'UNVERIFIED',
+    fullLegalName: userProfile.name,
+    nationality: 'Filipino',
+    hasFrontId: userProfile.id === '09171234567',
+    hasBackId: userProfile.id === '09171234567',
+    hasSelfieLiveness: userProfile.id === '09171234567',
+    isPep: false,
+    riskScore: 8,
+    riskLevel: 'LOW',
+    screeningStatus: userProfile.id === '09171234567' ? 'CLEAR' : 'NOT_SCREENED',
+    isFrozen: false,
+  }));
+  const [kycLimits, setKycLimits] = useState<KycTierLimits>(() =>
+    userProfile.id === '09171234567'
+      ? DEFAULT_KYC_TIERS.TIER_2_VERIFIED
+      : DEFAULT_KYC_TIERS.TIER_1_BASIC
+  );
+  const [complianceUsage, setComplianceUsage] = useState({
+    dailyOutgoingUsed: 0,
+    monthlyOutgoingUsed: 0,
+    dailyRemaining: userProfile.id === '09171234567' ? 100000 : 10000,
+    monthlyRemaining: userProfile.id === '09171234567' ? 500000 : 50000,
+  });
+  const [userComplianceAlerts, setUserComplianceAlerts] = useState<AmlAlert[]>([]);
+  const [adminComplianceOverview, setAdminComplianceOverview] =
+    useState<AdminComplianceOverview | null>(null);
+  const [isComplianceLoading, setIsComplianceLoading] = useState<boolean>(false);
 
   // Biometrics & Security State (Biometric lock screen & Quick Balance disabled per user request)
   const [isBiometricsEnabled, setIsBiometricsEnabled] = useState<boolean>(false);
@@ -729,9 +870,146 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const refreshComplianceData = React.useCallback(async () => {
+    if (!userProfile.id) return;
+    setIsComplianceLoading(true);
+    try {
+      const profileRes = await fetchComplianceProfileApi(userProfile.id);
+      if (profileRes && profileRes.success) {
+        setKycProfile(profileRes.profile);
+        setKycLimits(profileRes.limits);
+        if (profileRes.allTiers) setAllKycTiers(profileRes.allTiers);
+        setComplianceUsage(profileRes.usage);
+        setUserComplianceAlerts(profileRes.recentAlerts || []);
+      }
+
+      if (userProfile.role === 'SUPER_ADMIN' || userProfile.role === 'ADMIN') {
+        const overviewRes = await fetchAdminComplianceOverviewApi(userProfile.id);
+        if (overviewRes && overviewRes.success) {
+          setAdminComplianceOverview(overviewRes);
+        }
+      } else {
+        setAdminComplianceOverview(null);
+      }
+    } finally {
+      setIsComplianceLoading(false);
+    }
+  }, [userProfile.id, userProfile.role]);
+
+  useEffect(() => {
+    if (isAuthenticated && userProfile.id) {
+      refreshComplianceData();
+    }
+  }, [isAuthenticated, userProfile.id, userProfile.role, refreshComplianceData]);
+
+  const submitKycApplication = async (payload: Omit<KycSubmissionPayload, 'phone'>) => {
+    const res = await submitKycApplicationApi({
+      ...payload,
+      phone: userProfile.id,
+    });
+    if (res.success && res.profile) {
+      setKycProfile(res.profile);
+      await refreshComplianceData();
+      if (res.profile.status === 'VERIFIED') {
+        fireSuccessConfetti();
+        triggerTransactionPushAlert({
+          id: `KYC-${Date.now()}`,
+          category: 'SYSTEM',
+          title: 'eKYC Identity Verified',
+          body: 'Your account is now Tier 2 Verified with ₱100,000 daily and ₱500,000 monthly limits.',
+          timestamp: getCurrentTimeFormatted(),
+          createdAt: Date.now(),
+          read: false,
+          deliveredViaPush: true,
+          wasBackgrounded: false,
+        });
+      }
+    }
+    return res;
+  };
+
+  const screenEntityCompliance = async (params: {
+    fullName: string;
+    nationality?: string;
+    dateOfBirth?: string;
+  }) => {
+    return await screenEntityComplianceApi({
+      actorPhone: userProfile.id,
+      ...params,
+    });
+  };
+
+  const reviewKycApplication = async (params: {
+    targetPhone: string;
+    decision: KycStatus;
+    approvedTier?: KycTier;
+    reviewerNotes?: string;
+  }) => {
+    const res = await reviewKycApplicationApi({
+      actorPhone: userProfile.id,
+      ...params,
+    });
+    if (res.success) {
+      await refreshComplianceData();
+    }
+    return { success: res.success, error: res.error };
+  };
+
+  const updateAmlCase = async (params: {
+    alertId: string;
+    status: AmlCaseStatus;
+    reviewerNotes?: string;
+  }) => {
+    const res = await updateAmlCaseApi({
+      actorPhone: userProfile.id,
+      ...params,
+    });
+    if (res.success) {
+      await refreshComplianceData();
+    }
+    return res;
+  };
+
+  const toggleAccountFreeze = async (params: {
+    targetPhone: string;
+    freeze: boolean;
+    reason?: string;
+  }) => {
+    const res = await toggleAccountFreezeApi({
+      actorPhone: userProfile.id,
+      ...params,
+    });
+    if (res.success) {
+      await refreshComplianceData();
+    }
+    return { success: res.success, error: res.error };
+  };
+
+  const exportAmlcReport = async (format: 'json' | 'csv' = 'csv') => {
+    return await exportAmlcReportApi(userProfile.id, format);
+  };
+
+  const checkOutgoingComplianceGuard = (amount: number): string | null => {
+    if (kycProfile.isFrozen) {
+      return `Account frozen by Compliance (${kycProfile.frozenReason || 'Pending AML Review'}). Open KYC & AML Compliance Center for details.`;
+    }
+    if (amount > kycLimits.singleTransactionLimit) {
+      return `Exceeds your ${kycLimits.label} single transaction limit of ₱${kycLimits.singleTransactionLimit.toLocaleString()}. Complete eKYC verification to raise your limit up to ₱500,000.`;
+    }
+    if (complianceUsage.dailyOutgoingUsed + amount > kycLimits.dailyOutgoingLimit) {
+      return `Daily KYC outgoing limit reached (₱${complianceUsage.dailyRemaining.toLocaleString()} remaining of ₱${kycLimits.dailyOutgoingLimit.toLocaleString()}). Upgrade your KYC Tier to continue.`;
+    }
+    if (complianceUsage.monthlyOutgoingUsed + amount > kycLimits.monthlyOutgoingLimit) {
+      return `Monthly KYC outgoing limit of ₱${kycLimits.monthlyOutgoingLimit.toLocaleString()} reached. Upgrade your KYC Tier to increase capacity.`;
+    }
+    return null;
+  };
+
   const sendMoney = (recipient: string, amount: number, channel: string, note: string) => {
     if (amount <= 0) return { success: false, error: 'Amount must be greater than zero.' };
     if (userProfile.balance < amount) return { success: false, error: 'Insufficient wallet balance.' };
+    const complianceError = checkOutgoingComplianceGuard(amount);
+    if (complianceError) return { success: false, error: complianceError };
 
     const earnedPoints = Math.max(5, Math.floor(amount / 50));
     const newBalance = userProfile.balance - amount;
@@ -810,6 +1088,34 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 }
               : curr
           );
+          refreshComplianceData();
+        } else if (res.error) {
+          // Server-side AML / Sanctions block: revert optimistic local balance & record notice
+          setUserProfile((prev) => ({
+            ...prev,
+            balance: Number((prev.balance + amount).toFixed(2)),
+            points: Math.max(0, prev.points - earnedPoints),
+          }));
+          setTransactions((prev) =>
+            prev.map((item) =>
+              item.id === tx.id
+                ? { ...item, status: 'Failed', breakdownNote: `AML Compliance Block: ${res.error}` }
+                : item
+            )
+          );
+          setActiveReceiptTransaction(null);
+          triggerTransactionPushAlert({
+            id: `AML-BLK-${Date.now()}`,
+            category: 'SYSTEM',
+            title: 'Transaction Blocked by AML Compliance',
+            body: res.error,
+            timestamp: getCurrentTimeFormatted(),
+            createdAt: Date.now(),
+            read: false,
+            deliveredViaPush: true,
+            wasBackgrounded: false,
+          });
+          refreshComplianceData();
         }
       })
       .catch(() => {});
@@ -821,6 +1127,8 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const totalDebit = amount + biller.fee;
     if (amount <= 0) return { success: false, error: 'Amount must be greater than zero.' };
     if (userProfile.balance < totalDebit) return { success: false, error: 'Insufficient balance for bill payment.' };
+    const complianceError = checkOutgoingComplianceGuard(totalDebit);
+    if (complianceError) return { success: false, error: complianceError };
 
     const pointsEarned = Math.max(10, Math.floor(amount / 40));
     const newBalance = userProfile.balance - totalDebit;
@@ -902,6 +1210,7 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 }
               : curr
           );
+          refreshComplianceData();
         }
       })
       .catch(() => {});
@@ -912,6 +1221,8 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const buyLoad = (phone: string, telco: string, amount: number, promoTitle?: string) => {
     if (amount <= 0) return { success: false, error: 'Select a valid load denomination or promo.' };
     if (userProfile.balance < amount) return { success: false, error: 'Insufficient wallet balance.' };
+    const complianceError = checkOutgoingComplianceGuard(amount);
+    if (complianceError) return { success: false, error: complianceError };
 
     const points = Math.max(2, Math.floor(amount / 20));
     const newBalance = userProfile.balance - amount;
@@ -2060,6 +2371,21 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         clearNotifications,
         openNotificationTransaction,
         simulateBackgroundPushAlert,
+        // KYC & AML Compliance Infrastructure
+        kycProfile,
+        kycLimits,
+        allKycTiers,
+        complianceUsage,
+        userComplianceAlerts,
+        adminComplianceOverview,
+        isComplianceLoading,
+        refreshComplianceData,
+        submitKycApplication,
+        screenEntityCompliance,
+        reviewKycApplication,
+        updateAmlCase,
+        toggleAccountFreeze,
+        exportAmlcReport,
       }}
     >
       {children}

@@ -17,6 +17,7 @@ import { TransactionsHistoryScreen } from './components/screens/TransactionsHist
 import { ServicesHubScreen } from './components/screens/ServicesHubScreen';
 import { ProfileScreen } from './components/screens/ProfileScreen';
 import { BudgetPlannerScreen } from './components/screens/BudgetPlannerScreen';
+import { KycComplianceScreen } from './components/screens/KycComplianceScreen';
 import { BottomNavigation } from './components/layout/BottomNavigation';
 import { TransactionReceiptModal } from './components/common/TransactionReceiptModal';
 import { SimulationResultModal } from './components/common/SimulationResultModal';
@@ -76,6 +77,8 @@ const AppContent: React.FC = () => {
         return <BuilderUpgradeScreen />;
       case 'TRANSACTIONS_FULL':
         return <TransactionsHistoryScreen />;
+      case 'KYC_COMPLIANCE':
+        return <KycComplianceScreen />;
       case 'MAIN':
       default:
         switch (selectedBottomTab) {

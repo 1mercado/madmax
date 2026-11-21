@@ -7,9 +7,34 @@
       "balance": 25000,
       "points": 500,
       "tier": "BASIC",
-      "updatedAt": "2026-11-04T22:58:00.000Z"
+      "updatedAt": "2026-11-04T22:58:00.000Z",
+      "role": "SUPER_ADMIN"
     }
   },
   "transactions": {},
-  "savedBillers": {}
+  "savedBillers": {},
+  "kycRecords": {
+    "09171234567": {
+      "phone": "09171234567",
+      "tier": "TIER_2_VERIFIED",
+      "status": "VERIFIED",
+      "fullLegalName": "Super Admin",
+      "nationality": "Filipino",
+      "hasFrontId": true,
+      "hasBackId": true,
+      "hasSelfieLiveness": true,
+      "livenessScore": 99,
+      "isPep": false,
+      "riskScore": 8,
+      "riskLevel": "LOW",
+      "screeningStatus": "CLEAR",
+      "screeningRef": "SCR-20261023-ADMIN001",
+      "reviewedAt": "2026-10-23T10:05:00.000Z",
+      "reviewedBy": "AMLC-AUTO-CORE",
+      "reviewerNotes": "Verified Institutional Super Admin Account"
+    }
+  },
+  "amlAlerts": [],
+  "complianceAuditLog": [],
+  "frozenAccounts": {}
 }

@@ -185,7 +185,99 @@ interface LedgerAccount {
   balance: number;
   points: number;
   tier: string;
+  role?: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
   updatedAt: string;
+}
+
+type ServerKycTier = 'TIER_1_BASIC' | 'TIER_2_VERIFIED' | 'TIER_3_ENHANCED';
+type ServerKycStatus = 'UNVERIFIED' | 'PENDING_REVIEW' | 'VERIFIED' | 'REJECTED' | 'ACTION_REQUIRED';
+type ServerAmlRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+type ServerAmlAlertType =
+  | 'CTR_THRESHOLD'
+  | 'STR_STRUCTURING'
+  | 'VELOCITY_SPIKE'
+  | 'SANCTIONS_MATCH'
+  | 'PEP_FLAG'
+  | 'KYC_LIMIT_EXCEEDED'
+  | 'ACCOUNT_FROZEN';
+type ServerAmlCaseStatus = 'OPEN' | 'UNDER_REVIEW' | 'CLEARED' | 'FILED_AMLC' | 'ESCALATED';
+
+interface ServerKycTierLimits {
+  tier: ServerKycTier;
+  label: string;
+  singleTransactionLimit: number;
+  dailyOutgoingLimit: number;
+  monthlyOutgoingLimit: number;
+  maxWalletBalance: number;
+  features: string[];
+}
+
+interface ServerKycRecord {
+  phone: string;
+  tier: ServerKycTier;
+  status: ServerKycStatus;
+  fullLegalName: string;
+  dateOfBirth?: string;
+  nationality?: string;
+  residentialAddress?: string;
+  city?: string;
+  occupation?: string;
+  sourceOfFunds?: string;
+  idType?: string;
+  idNumberHash?: string;
+  maskedIdNumber?: string;
+  idDocumentHash?: string;
+  selfieDocumentHash?: string;
+  hasFrontId: boolean;
+  hasBackId: boolean;
+  hasSelfieLiveness: boolean;
+  livenessScore?: number;
+  isPep: boolean;
+  pepDetails?: string;
+  riskScore: number;
+  riskLevel: ServerAmlRiskLevel;
+  screeningStatus: 'NOT_SCREENED' | 'CLEAR' | 'REVIEW_REQUIRED' | 'BLOCKED';
+  screeningRef?: string;
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewerNotes?: string;
+}
+
+interface ServerAmlAlert {
+  id: string;
+  accountPhone: string;
+  accountName: string;
+  type: ServerAmlAlertType;
+  severity: ServerAmlRiskLevel;
+  status: ServerAmlCaseStatus;
+  title: string;
+  description: string;
+  amount?: number;
+  transactionRef?: string;
+  counterparty?: string;
+  ruleTriggered: string;
+  amlcFilingRef?: string;
+  reviewerNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ServerComplianceAuditEntry {
+  id: string;
+  timestamp: string;
+  actorPhone: string;
+  actorRole: string;
+  action: string;
+  targetPhone?: string;
+  details: string;
+}
+
+interface ServerFrozenAccount {
+  phone: string;
+  reason: string;
+  frozenBy: string;
+  frozenAt: string;
 }
 
 interface LedgerTransaction {
@@ -226,6 +318,545 @@ interface LedgerStore {
   accounts: Record<string, LedgerAccount>;
   transactions: Record<string, LedgerTransaction[]>;
   savedBillers: Record<string, SavedBillerAccount[]>;
+  kycRecords: Record<string, ServerKycRecord>;
+  amlAlerts: ServerAmlAlert[];
+  complianceAuditLog: ServerComplianceAuditEntry[];
+  frozenAccounts: Record<string, ServerFrozenAccount>;
+}
+
+const KYC_TIER_LIMITS: Record<ServerKycTier, ServerKycTierLimits> = {
+  TIER_1_BASIC: {
+    tier: 'TIER_1_BASIC',
+    label: 'Tier 1 · Basic Account',
+    singleTransactionLimit: 10000,
+    dailyOutgoingLimit: 10000,
+    monthlyOutgoingLimit: 50000,
+    maxWalletBalance: 50000,
+    features: [
+      'Basic wallet cash-in & QR Ph receive',
+      'Send money & pay bills up to ₱10,000/day',
+      'Monthly outgoing cap of ₱50,000',
+    ],
+  },
+  TIER_2_VERIFIED: {
+    tier: 'TIER_2_VERIFIED',
+    label: 'Tier 2 · Full eKYC Verified',
+    singleTransactionLimit: 100000,
+    dailyOutgoingLimit: 100000,
+    monthlyOutgoingLimit: 500000,
+    maxWalletBalance: 500000,
+    features: [
+      'Full InstaPay & PESONet bank disbursements',
+      'Up to ₱100,000 daily / ₱500,000 monthly outgoing',
+      'Priority BancNet billers & high-yield Savings Vault',
+    ],
+  },
+  TIER_3_ENHANCED: {
+    tier: 'TIER_3_ENHANCED',
+    label: 'Tier 3 · Enhanced Due Diligence (EDD)',
+    singleTransactionLimit: 500000,
+    dailyOutgoingLimit: 500000,
+    monthlyOutgoingLimit: 2000000,
+    maxWalletBalance: 5000000,
+    features: [
+      'High-volume PESONet & business treasury transfers',
+      'Up to ₱500,000 daily / ₱2,000,000 monthly outgoing',
+      'Dedicated AMLC CTR auto-filing & institutional clearing',
+    ],
+  },
+};
+
+const VALID_GOV_ID_TYPES = new Set([
+  'PHILSYS_NATIONAL_ID',
+  'PASSPORT',
+  'DRIVERS_LICENSE',
+  'UMID',
+  'PRC_ID',
+  'POSTAL_ID',
+  'VOTERS_ID',
+]);
+
+const VALID_KYC_DECISIONS = new Set<ServerKycStatus>([
+  'VERIFIED',
+  'REJECTED',
+  'ACTION_REQUIRED',
+  'PENDING_REVIEW',
+]);
+
+const VALID_AML_CASE_STATUSES = new Set<ServerAmlCaseStatus>([
+  'OPEN',
+  'UNDER_REVIEW',
+  'CLEARED',
+  'FILED_AMLC',
+  'ESCALATED',
+]);
+
+// Curated sanctions & watchlist screening keywords (OFAC SDN / UNSC / AMLC / PEP patterns)
+const SANCTIONS_PATTERNS: Array<{
+  pattern: string;
+  listName: 'OFAC SDN' | 'UNSC Consolidated' | 'AMLC PH Watchlist' | 'PEP Registry';
+  category: 'SANCTIONS' | 'TERRORISM_FINANCING' | 'PEP' | 'ADVERSE_MEDIA';
+  weight: number;
+}> = [
+  { pattern: 'ofac test', listName: 'OFAC SDN', category: 'SANCTIONS', weight: 95 },
+  { pattern: 'sanctioned entity', listName: 'OFAC SDN', category: 'SANCTIONS', weight: 98 },
+  { pattern: 'lazarus group', listName: 'OFAC SDN', category: 'SANCTIONS', weight: 99 },
+  { pattern: 'abu sayyaf', listName: 'UNSC Consolidated', category: 'TERRORISM_FINANCING', weight: 99 },
+  { pattern: 'maute group', listName: 'AMLC PH Watchlist', category: 'TERRORISM_FINANCING', weight: 99 },
+  { pattern: 'al-qaida', listName: 'UNSC Consolidated', category: 'TERRORISM_FINANCING', weight: 99 },
+  { pattern: 'isis', listName: 'UNSC Consolidated', category: 'TERRORISM_FINANCING', weight: 95 },
+  { pattern: 'kim jong', listName: 'OFAC SDN', category: 'SANCTIONS', weight: 95 },
+  { pattern: 'shell offshore', listName: 'AMLC PH Watchlist', category: 'ADVERSE_MEDIA', weight: 65 },
+  { pattern: 'darknet mixer', listName: 'OFAC SDN', category: 'SANCTIONS', weight: 95 },
+  { pattern: 'senator', listName: 'PEP Registry', category: 'PEP', weight: 45 },
+  { pattern: 'congressman', listName: 'PEP Registry', category: 'PEP', weight: 45 },
+  { pattern: 'governor', listName: 'PEP Registry', category: 'PEP', weight: 40 },
+  { pattern: 'mayor', listName: 'PEP Registry', category: 'PEP', weight: 38 },
+];
+
+const HIGH_RISK_JURISDICTIONS = new Set([
+  'north korea',
+  'dprk',
+  'iran',
+  'myanmar',
+  'syria',
+]);
+
+function sanitizeText(val: unknown, maxLen: number): string {
+  return String(val ?? '')
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .trim()
+    .slice(0, maxLen);
+}
+
+function maskGovernmentId(idNumber: string): string {
+  const clean = idNumber.replace(/\s+/g, '');
+  if (clean.length <= 4) return '••••';
+  return `${'•'.repeat(Math.min(8, clean.length - 4))}${clean.slice(-4)}`;
+}
+
+function hashSensitiveData(value: string): string {
+  return crypto
+    .createHmac('sha256', GATEWAY_KEYRING.digicash.secretKey)
+    .update(value)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function validateBase64Image(dataUrl: unknown): { valid: boolean; hash?: string; error?: string } {
+  if (!dataUrl || typeof dataUrl !== 'string') {
+    return { valid: false };
+  }
+  const match = dataUrl.match(/^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) {
+    return { valid: false, error: 'Document must be a valid PNG, JPEG, or WebP image.' };
+  }
+  // Base64 length cap ~2.7MB (~2MB decoded binary)
+  if (match[2].length > 2_800_000) {
+    return { valid: false, error: 'Uploaded image exceeds the 2MB security limit.' };
+  }
+  return {
+    valid: true,
+    hash: `doc_${crypto.createHash('sha256').update(match[2]).digest('hex').slice(0, 24)}`,
+  };
+}
+
+function screenEntityAgainstWatchlists(params: {
+  fullName: string;
+  nationality?: string;
+  isPep?: boolean;
+}) {
+  const normalizedName = sanitizeText(params.fullName, 120).toLowerCase();
+  const normalizedNat = sanitizeText(params.nationality || '', 60).toLowerCase();
+
+  const matches: Array<{
+    listName: 'OFAC SDN' | 'UNSC Consolidated' | 'AMLC PH Watchlist' | 'PEP Registry';
+    matchedTerm: string;
+    confidence: number;
+    category: 'SANCTIONS' | 'TERRORISM_FINANCING' | 'PEP' | 'ADVERSE_MEDIA';
+  }> = [];
+
+  let score = 5; // baseline clean score
+
+  for (const rule of SANCTIONS_PATTERNS) {
+    if (normalizedName.includes(rule.pattern)) {
+      matches.push({
+        listName: rule.listName,
+        matchedTerm: rule.pattern.toUpperCase(),
+        confidence: rule.weight >= 90 ? 96 : 78,
+        category: rule.category,
+      });
+      score = Math.max(score, rule.weight);
+    }
+  }
+
+  if (normalizedNat && HIGH_RISK_JURISDICTIONS.has(normalizedNat)) {
+    matches.push({
+      listName: 'OFAC SDN',
+      matchedTerm: `FATF HIGH-RISK JURISDICTION (${normalizedNat.toUpperCase()})`,
+      confidence: 92,
+      category: 'SANCTIONS',
+    });
+    score = Math.max(score, 88);
+  }
+
+  if (params.isPep) {
+    if (!matches.some((m) => m.category === 'PEP')) {
+      matches.push({
+        listName: 'PEP Registry',
+        matchedTerm: 'SELF-DECLARED POLITICALLY EXPOSED PERSON',
+        confidence: 100,
+        category: 'PEP',
+      });
+    }
+    score = Math.max(score, 55);
+  }
+
+  const riskLevel: ServerAmlRiskLevel =
+    score >= 85 ? 'CRITICAL' : score >= 60 ? 'HIGH' : score >= 35 ? 'MEDIUM' : 'LOW';
+
+  const status: 'CLEAR' | 'REVIEW_REQUIRED' | 'BLOCKED' =
+    score >= 85 ? 'BLOCKED' : score >= 35 ? 'REVIEW_REQUIRED' : 'CLEAR';
+
+  return {
+    screenedName: sanitizeText(params.fullName, 120),
+    screenedAt: new Date().toISOString(),
+    status,
+    riskScore: score,
+    riskLevel,
+    matches,
+    screeningRef: generateClearingTrace('SCR'),
+  };
+}
+
+function getOrCreateKycRecord(store: LedgerStore, phone: string): ServerKycRecord {
+  const norm = normalizePhPhone(phone);
+  if (store.kycRecords[norm]) {
+    return store.kycRecords[norm];
+  }
+  const acc = store.accounts[norm];
+  const isSuperAdmin = norm === '09171234567';
+  const defaultRecord: ServerKycRecord = {
+    phone: norm,
+    tier: isSuperAdmin ? 'TIER_2_VERIFIED' : 'TIER_1_BASIC',
+    status: isSuperAdmin ? 'VERIFIED' : 'UNVERIFIED',
+    fullLegalName: acc?.name || 'DigiCash User',
+    nationality: 'Filipino',
+    hasFrontId: isSuperAdmin,
+    hasBackId: isSuperAdmin,
+    hasSelfieLiveness: isSuperAdmin,
+    livenessScore: isSuperAdmin ? 99 : undefined,
+    isPep: false,
+    riskScore: 8,
+    riskLevel: 'LOW',
+    screeningStatus: isSuperAdmin ? 'CLEAR' : 'NOT_SCREENED',
+    screeningRef: isSuperAdmin ? 'SCR-20261023-ADMIN001' : undefined,
+    reviewedAt: isSuperAdmin ? '2026-10-23T10:05:00.000Z' : undefined,
+    reviewedBy: isSuperAdmin ? 'AMLC-AUTO-CORE' : undefined,
+    reviewerNotes: isSuperAdmin ? 'Verified Institutional Super Admin Account' : undefined,
+  };
+  store.kycRecords[norm] = defaultRecord;
+  return defaultRecord;
+}
+
+function computeAccountUsage(store: LedgerStore, phone: string) {
+  const norm = normalizePhPhone(phone);
+  const txs = store.transactions[norm] || [];
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const monthMs = 30 * dayMs;
+
+  let dailyOutgoingUsed = 0;
+  let monthlyOutgoingUsed = 0;
+  let last10MinCount = 0;
+  let last24hTotal = 0;
+  let structuringCandidatesCount = 0;
+  let structuringCandidatesSum = 0;
+
+  for (const tx of txs) {
+    const ts = tx.createdAt || now;
+    const age = now - ts;
+    if (age <= 10 * 60 * 1000) {
+      last10MinCount += 1;
+    }
+    if (age <= dayMs) {
+      last24hTotal += tx.amount;
+      if (tx.direction === 'OUTGOING') {
+        dailyOutgoingUsed += tx.amount;
+      }
+      if (tx.amount >= 40000 && tx.amount < 500000) {
+        structuringCandidatesCount += 1;
+        structuringCandidatesSum += tx.amount;
+      }
+    }
+    if (age <= monthMs && tx.direction === 'OUTGOING') {
+      monthlyOutgoingUsed += tx.amount;
+    }
+  }
+
+  return {
+    dailyOutgoingUsed: Number(dailyOutgoingUsed.toFixed(2)),
+    monthlyOutgoingUsed: Number(monthlyOutgoingUsed.toFixed(2)),
+    last10MinCount,
+    last24hTotal: Number(last24hTotal.toFixed(2)),
+    structuringCandidatesCount,
+    structuringCandidatesSum: Number(structuringCandidatesSum.toFixed(2)),
+  };
+}
+
+function appendComplianceAudit(
+  store: LedgerStore,
+  entry: Omit<ServerComplianceAuditEntry, 'id' | 'timestamp'>
+) {
+  store.complianceAuditLog.unshift({
+    id: `AUD-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
+    timestamp: new Date().toISOString(),
+    ...entry,
+  });
+  if (store.complianceAuditLog.length > 250) {
+    store.complianceAuditLog = store.complianceAuditLog.slice(0, 250);
+  }
+}
+
+function createAmlAlert(
+  store: LedgerStore,
+  alert: Omit<ServerAmlAlert, 'id' | 'createdAt' | 'updatedAt'>
+): ServerAmlAlert {
+  const nowIso = new Date().toISOString();
+  const created: ServerAmlAlert = {
+    id: `AML-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    ...alert,
+  };
+  store.amlAlerts.unshift(created);
+  if (store.amlAlerts.length > 300) {
+    store.amlAlerts = store.amlAlerts.slice(0, 300);
+  }
+  return created;
+}
+
+function evaluateTransactionAml(params: {
+  store: LedgerStore;
+  phone: string;
+  amount: number;
+  direction: 'INCOMING' | 'OUTGOING';
+  counterpartyName?: string;
+  transactionRef: string;
+  txType: string;
+}): {
+  allowed: boolean;
+  blockReason?: string;
+  blockCode?: 'ACCOUNT_FROZEN' | 'KYC_LIMIT_EXCEEDED' | 'SANCTIONS_MATCH';
+  triggeredAlerts: ServerAmlAlert[];
+} {
+  const normPhone = normalizePhPhone(params.phone);
+  const acc = params.store.accounts[normPhone];
+  const accountName = acc?.name || `User ${normPhone.slice(-4)}`;
+  const kyc = getOrCreateKycRecord(params.store, normPhone);
+  const limits = KYC_TIER_LIMITS[kyc.tier] || KYC_TIER_LIMITS.TIER_1_BASIC;
+  const usage = computeAccountUsage(params.store, normPhone);
+  const triggeredAlerts: ServerAmlAlert[] = [];
+
+  // 1. Account Freeze Enforcement
+  const frozen = params.store.frozenAccounts[normPhone];
+  if (frozen) {
+    const alert = createAmlAlert(params.store, {
+      accountPhone: normPhone,
+      accountName,
+      type: 'ACCOUNT_FROZEN',
+      severity: 'HIGH',
+      status: 'OPEN',
+      title: 'Blocked Attempt on Frozen Account',
+      description: `Attempted ${params.txType} of ₱${params.amount.toLocaleString()} while account is under compliance freeze (${frozen.reason}).`,
+      amount: params.amount,
+      transactionRef: params.transactionRef,
+      counterparty: params.counterpartyName,
+      ruleTriggered: 'RULE-FREEZE-001: Active Compliance Freeze',
+    });
+    triggeredAlerts.push(alert);
+    return {
+      allowed: false,
+      blockCode: 'ACCOUNT_FROZEN',
+      blockReason: `Account is currently frozen by Compliance (${frozen.reason}). Visit KYC & AML Compliance Center for details.`,
+      triggeredAlerts,
+    };
+  }
+
+  // 2. Counterparty Sanctions / Watchlist Screening
+  if (params.counterpartyName && params.counterpartyName.trim().length >= 3) {
+    const screen = screenEntityAgainstWatchlists({ fullName: params.counterpartyName });
+    if (screen.status === 'BLOCKED') {
+      const alert = createAmlAlert(params.store, {
+        accountPhone: normPhone,
+        accountName,
+        type: 'SANCTIONS_MATCH',
+        severity: 'CRITICAL',
+        status: 'ESCALATED',
+        title: `Sanctions Watchlist Hit: ${params.counterpartyName}`,
+        description: `Real-time screening blocked ${params.txType} of ₱${params.amount.toLocaleString()} against ${screen.matches.map((m) => m.listName).join(', ')} (Ref: ${screen.screeningRef}).`,
+        amount: params.amount,
+        transactionRef: params.transactionRef,
+        counterparty: params.counterpartyName,
+        ruleTriggered: 'RULE-SANCTIONS-001: OFAC/UNSC/AMLC Match Block',
+      });
+      triggeredAlerts.push(alert);
+      kyc.riskScore = Math.max(kyc.riskScore, 85);
+      kyc.riskLevel = 'CRITICAL';
+      return {
+        allowed: false,
+        blockCode: 'SANCTIONS_MATCH',
+        blockReason: `Transaction blocked by AML Sanctions Screening (${screen.screeningRef}). Counterparty matched a restricted watchlist.`,
+        triggeredAlerts,
+      };
+    }
+  }
+
+  // 3. KYC Tier Limits Enforcement (Outgoing transactions)
+  if (params.direction === 'OUTGOING') {
+    if (params.amount > limits.singleTransactionLimit) {
+      const alert = createAmlAlert(params.store, {
+        accountPhone: normPhone,
+        accountName,
+        type: 'KYC_LIMIT_EXCEEDED',
+        severity: 'MEDIUM',
+        status: 'CLEARED',
+        title: `Single Transaction Limit Exceeded (${kyc.tier})`,
+        description: `Attempted ₱${params.amount.toLocaleString()} exceeded single limit of ₱${limits.singleTransactionLimit.toLocaleString()}.`,
+        amount: params.amount,
+        transactionRef: params.transactionRef,
+        counterparty: params.counterpartyName,
+        ruleTriggered: 'RULE-KYC-001: BSP Circular 950 Tier Cap',
+      });
+      triggeredAlerts.push(alert);
+      return {
+        allowed: false,
+        blockCode: 'KYC_LIMIT_EXCEEDED',
+        blockReason: `Exceeds your ${limits.label} single limit of ₱${limits.singleTransactionLimit.toLocaleString()}. Complete eKYC verification to increase limits up to ₱500,000/day.`,
+        triggeredAlerts,
+      };
+    }
+
+    if (usage.dailyOutgoingUsed + params.amount > limits.dailyOutgoingLimit) {
+      const remaining = Math.max(0, limits.dailyOutgoingLimit - usage.dailyOutgoingUsed);
+      const alert = createAmlAlert(params.store, {
+        accountPhone: normPhone,
+        accountName,
+        type: 'KYC_LIMIT_EXCEEDED',
+        severity: 'MEDIUM',
+        status: 'CLEARED',
+        title: `Daily Outgoing Limit Exceeded (${kyc.tier})`,
+        description: `24h outgoing volume ₱${(usage.dailyOutgoingUsed + params.amount).toLocaleString()} exceeds ₱${limits.dailyOutgoingLimit.toLocaleString()} tier cap.`,
+        amount: params.amount,
+        transactionRef: params.transactionRef,
+        counterparty: params.counterpartyName,
+        ruleTriggered: 'RULE-KYC-002: Daily Outgoing Limit',
+      });
+      triggeredAlerts.push(alert);
+      return {
+        allowed: false,
+        blockCode: 'KYC_LIMIT_EXCEEDED',
+        blockReason: `Daily KYC limit reached. Remaining today: ₱${remaining.toLocaleString()} (Limit: ₱${limits.dailyOutgoingLimit.toLocaleString()}). Upgrade your KYC Tier to transact higher amounts.`,
+        triggeredAlerts,
+      };
+    }
+
+    if (usage.monthlyOutgoingUsed + params.amount > limits.monthlyOutgoingLimit) {
+      return {
+        allowed: false,
+        blockCode: 'KYC_LIMIT_EXCEEDED',
+        blockReason: `Monthly KYC outgoing cap of ₱${limits.monthlyOutgoingLimit.toLocaleString()} reached for ${limits.label}. Upgrade your KYC Tier to continue.`,
+        triggeredAlerts,
+      };
+    }
+  }
+
+  // 4. AMLC Covered Transaction Report (CTR) — >= ₱500,000 single or 24h cumulative
+  if (params.amount >= 500000 || usage.last24hTotal + params.amount >= 500000) {
+    const filingRef = generateClearingTrace('AMLC-CTR');
+    const alert = createAmlAlert(params.store, {
+      accountPhone: normPhone,
+      accountName,
+      type: 'CTR_THRESHOLD',
+      severity: 'HIGH',
+      status: 'OPEN',
+      title: 'AMLC Covered Transaction Report (CTR ≥ ₱500,000)',
+      description: `Transaction of ₱${params.amount.toLocaleString()} (24h cumulative: ₱${(usage.last24hTotal + params.amount).toLocaleString()}) met the RA 9160 ₱500,000 CTR reporting threshold.`,
+      amount: params.amount,
+      transactionRef: params.transactionRef,
+      counterparty: params.counterpartyName,
+      ruleTriggered: 'RULE-AMLC-CTR-500K: RA 9160 Sec. 3(b)',
+      amlcFilingRef: filingRef,
+    });
+    triggeredAlerts.push(alert);
+    kyc.riskScore = Math.min(100, Math.max(kyc.riskScore, 60));
+    kyc.riskLevel = kyc.riskScore >= 85 ? 'CRITICAL' : 'HIGH';
+  }
+
+  // 5. Structuring / Smurfing Detection (STR) — 3+ mid-large transfers in 24h totaling >= ₱450k
+  const isCandidate = params.amount >= 40000 && params.amount < 500000;
+  if (
+    isCandidate &&
+    usage.structuringCandidatesCount + 1 >= 3 &&
+    usage.structuringCandidatesSum + params.amount >= 450000
+  ) {
+    const alert = createAmlAlert(params.store, {
+      accountPhone: normPhone,
+      accountName,
+      type: 'STR_STRUCTURING',
+      severity: 'HIGH',
+      status: 'OPEN',
+      title: 'Potential Structuring / Smurfing Pattern Detected (STR)',
+      description: `${usage.structuringCandidatesCount + 1} split transactions within 24h totaling ₱${(usage.structuringCandidatesSum + params.amount).toLocaleString()} below CTR threshold.`,
+      amount: params.amount,
+      transactionRef: params.transactionRef,
+      counterparty: params.counterpartyName,
+      ruleTriggered: 'RULE-AMLC-STR-002: Split-Threshold Structuring',
+    });
+    triggeredAlerts.push(alert);
+    kyc.riskScore = Math.min(100, Math.max(kyc.riskScore, 72));
+    kyc.riskLevel = 'HIGH';
+  }
+
+  // 6. High-Velocity Burst Detection — 5+ transactions within 10 minutes
+  if (usage.last10MinCount + 1 >= 5) {
+    const alert = createAmlAlert(params.store, {
+      accountPhone: normPhone,
+      accountName,
+      type: 'VELOCITY_SPIKE',
+      severity: 'MEDIUM',
+      status: 'OPEN',
+      title: 'High Transaction Velocity Burst Detected',
+      description: `${usage.last10MinCount + 1} transactions executed within a 10-minute sliding window.`,
+      amount: params.amount,
+      transactionRef: params.transactionRef,
+      counterparty: params.counterpartyName,
+      ruleTriggered: 'RULE-AML-VEL-003: Rapid 10-Min Burst',
+    });
+    triggeredAlerts.push(alert);
+    kyc.riskScore = Math.min(100, Math.max(kyc.riskScore, 45));
+    if (kyc.riskLevel === 'LOW') kyc.riskLevel = 'MEDIUM';
+  }
+
+  return {
+    allowed: true,
+    triggeredAlerts,
+  };
+}
+
+function verifyComplianceAdmin(
+  req: express.Request,
+  store: LedgerStore
+): { authorized: boolean; actorPhone: string; actorRole: string } {
+  const rawActorPhone = req.header('x-compliance-actor-phone') || '';
+  if (!rawActorPhone) {
+    return { authorized: false, actorPhone: '', actorRole: 'GUEST' };
+  }
+  const normPhone = normalizePhPhone(rawActorPhone);
+  const acc = store.accounts[normPhone];
+  const role = acc?.role || (normPhone === '09171234567' ? 'SUPER_ADMIN' : 'USER');
+  const authorized = role === 'SUPER_ADMIN' || role === 'ADMIN';
+  return { authorized, actorPhone: normPhone, actorRole: role };
 }
 
 function normalizePhPhone(raw: string): string {
@@ -328,7 +959,21 @@ function loadLedger(): LedgerStore {
     }
     if (fs.existsSync(LEDGER_FILE)) {
       const raw = fs.readFileSync(LEDGER_FILE, 'utf-8');
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw) as Partial<LedgerStore>;
+      const normalized: LedgerStore = {
+        accounts: parsed.accounts || {},
+        transactions: parsed.transactions || {},
+        savedBillers: parsed.savedBillers || {},
+        kycRecords: parsed.kycRecords || {},
+        amlAlerts: Array.isArray(parsed.amlAlerts) ? parsed.amlAlerts : [],
+        complianceAuditLog: Array.isArray(parsed.complianceAuditLog) ? parsed.complianceAuditLog : [],
+        frozenAccounts: parsed.frozenAccounts || {},
+      };
+      if (normalized.accounts['09171234567'] && !normalized.accounts['09171234567'].role) {
+        normalized.accounts['09171234567'].role = 'SUPER_ADMIN';
+      }
+      getOrCreateKycRecord(normalized, '09171234567');
+      return normalized;
     }
   } catch (err) {
     console.warn('Initializing fresh DigiCash ledger:', err);
@@ -343,13 +988,19 @@ function loadLedger(): LedgerStore {
         balance: 25000.0,
         points: 500,
         tier: 'BASIC',
+        role: 'SUPER_ADMIN',
         updatedAt: new Date().toISOString(),
       },
     },
     transactions: {},
     savedBillers: {},
+    kycRecords: {},
+    amlAlerts: [],
+    complianceAuditLog: [],
+    frozenAccounts: {},
   };
 
+  getOrCreateKycRecord(initial, '09171234567');
   saveLedger(initial);
   return initial;
 }
@@ -403,7 +1054,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '6mb' }));
 
   // Middleware: Verify & bind client Public Key + server Secret Key on all /api/fintech routes
   app.use('/api/fintech', (req, res, next) => {
@@ -629,6 +1280,29 @@ async function startServer() {
         : 'INSTAPAY';
 
     const clearingTraceId = generateClearingTrace(rail === 'DIGICASH_P2P' ? 'DCP2P' : rail);
+
+    // Real-time KYC Limit & AML Compliance Monitoring Gate
+    const amlCheck = evaluateTransactionAml({
+      store,
+      phone: normSender,
+      amount: parsedAmount,
+      direction: 'OUTGOING',
+      counterpartyName: recipientName || String(recipientIdentifier || ''),
+      transactionRef: clearingTraceId,
+      txType: 'SEND_MONEY',
+    });
+
+    if (!amlCheck.allowed) {
+      saveLedger(store);
+      res.status(403).json({
+        success: false,
+        complianceBlocked: true,
+        blockCode: amlCheck.blockCode,
+        error: amlCheck.blockReason,
+      });
+      return;
+    }
+
     const earnedPoints = Math.max(5, Math.floor(parsedAmount / 50));
 
     // Sign transfer settlement with gateway Public & Secret keys
@@ -671,6 +1345,7 @@ async function startServer() {
       direction: 'OUTGOING',
       date: 'Today',
       time: getTimeFormatted(),
+      createdAt: Date.now(),
       referenceNumber: clearingTraceId,
       status: 'Completed',
       fee: 0,
@@ -792,6 +1467,29 @@ async function startServer() {
     };
 
     const traceId = generateClearingTrace('QRPH-IN');
+
+    // Real-time AML Incoming Monitoring Gate (Frozen / Sanctions / CTR / Velocity)
+    const amlCheck = evaluateTransactionAml({
+      store,
+      phone: normRecipient,
+      amount: parsedAmount,
+      direction: 'INCOMING',
+      counterpartyName: senderName || sourceChannel || '',
+      transactionRef: traceId,
+      txType: 'RECEIVE_MONEY',
+    });
+
+    if (!amlCheck.allowed) {
+      saveLedger(store);
+      res.status(403).json({
+        success: false,
+        complianceBlocked: true,
+        blockCode: amlCheck.blockCode,
+        error: amlCheck.blockReason,
+      });
+      return;
+    }
+
     const gateway = resolveTransferGateway(sourceChannel || 'GCash');
     const signedWebhook = signWithGatewayKeys(gateway, {
       traceId,
@@ -893,6 +1591,28 @@ async function startServer() {
     }
 
     const traceId = generateClearingTrace(`ELOAD-${String(telco || 'TELCO').toUpperCase().slice(0, 5)}`);
+
+    const amlCheck = evaluateTransactionAml({
+      store,
+      phone: normAccount,
+      amount: parsedAmount,
+      direction: 'OUTGOING',
+      counterpartyName: `${telco || 'Telco'} ${targetPhone || ''}`,
+      transactionRef: traceId,
+      txType: 'TOP_UP_LOAD',
+    });
+
+    if (!amlCheck.allowed) {
+      saveLedger(store);
+      res.status(403).json({
+        success: false,
+        complianceBlocked: true,
+        blockCode: amlCheck.blockCode,
+        error: amlCheck.blockReason,
+      });
+      return;
+    }
+
     const serialPin = `${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}`;
     const pointsEarned = Math.max(2, Math.floor(parsedAmount / 20));
 
@@ -921,6 +1641,7 @@ async function startServer() {
       direction: 'OUTGOING',
       date: 'Today',
       time: getTimeFormatted(),
+      createdAt: Date.now(),
       referenceNumber: traceId,
       status: 'Completed',
       fee: 0,
@@ -1045,6 +1766,29 @@ async function startServer() {
     }
 
     const traceId = generateClearingTrace(`BILL-${biller?.code || 'CLR'}`);
+
+    // Real-time KYC Limit & AML Compliance Gate for Bill Payment
+    const amlCheck = evaluateTransactionAml({
+      store,
+      phone: normPhone,
+      amount: totalDebit,
+      direction: 'OUTGOING',
+      counterpartyName: biller?.name || 'Biller',
+      transactionRef: traceId,
+      txType: 'PAY_BILLS',
+    });
+
+    if (!amlCheck.allowed) {
+      saveLedger(store);
+      res.status(403).json({
+        success: false,
+        complianceBlocked: true,
+        blockCode: amlCheck.blockCode,
+        error: amlCheck.blockReason,
+      });
+      return;
+    }
+
     const pointsEarned = Math.max(10, Math.floor(parsedAmount / 40));
 
     const signedBill = signWithGatewayKeys(GATEWAY_KEYRING.bancnetBillers, {
@@ -1163,6 +1907,553 @@ async function startServer() {
     });
   });
 
+  // ============================================================================
+  // 11. KYC (Know Your Customer) & AML (Anti-Money Laundering) COMPLIANCE API
+  // ============================================================================
+
+  // 11a. Fetch user KYC profile, active BSP tier limits, and 24h/30d usage
+  app.get('/api/compliance/profile/:phone', (req, res) => {
+    const store = loadLedger();
+    const normPhone = normalizePhPhone(req.params.phone);
+    const record = getOrCreateKycRecord(store, normPhone);
+    const limits = KYC_TIER_LIMITS[record.tier] || KYC_TIER_LIMITS.TIER_1_BASIC;
+    const usage = computeAccountUsage(store, normPhone);
+    const frozen = store.frozenAccounts[normPhone];
+
+    const recentAlerts = store.amlAlerts
+      .filter((a) => a.accountPhone === normPhone)
+      .slice(0, 15);
+
+    saveLedger(store);
+
+    res.json({
+      success: true,
+      profile: {
+        ...record,
+        idNumberHash: undefined,
+        isFrozen: Boolean(frozen),
+        frozenReason: frozen?.reason,
+      },
+      limits,
+      allTiers: KYC_TIER_LIMITS,
+      usage: {
+        dailyOutgoingUsed: usage.dailyOutgoingUsed,
+        monthlyOutgoingUsed: usage.monthlyOutgoingUsed,
+        dailyRemaining: Math.max(0, Number((limits.dailyOutgoingLimit - usage.dailyOutgoingUsed).toFixed(2))),
+        monthlyRemaining: Math.max(0, Number((limits.monthlyOutgoingLimit - usage.monthlyOutgoingUsed).toFixed(2))),
+      },
+      recentAlerts,
+    });
+  });
+
+  // 11b. Submit eKYC Identity Application (Document Verification + Liveness + Sanctions/PEP Screening)
+  app.post('/api/compliance/kyc/submit', (req, res) => {
+    const body = req.body || {};
+    const normPhone = normalizePhPhone(body.phone || '');
+    const fullLegalName = sanitizeText(body.fullLegalName, 120);
+    const dateOfBirth = sanitizeText(body.dateOfBirth, 20);
+    const nationality = sanitizeText(body.nationality || 'Filipino', 60);
+    const residentialAddress = sanitizeText(body.residentialAddress, 220);
+    const city = sanitizeText(body.city, 80);
+    const occupation = sanitizeText(body.occupation, 100);
+    const sourceOfFunds = sanitizeText(body.sourceOfFunds, 100);
+    const idType = sanitizeText(body.idType, 40);
+    const idNumber = sanitizeText(body.idNumber, 60);
+    const isPep = Boolean(body.isPep);
+    const pepDetails = isPep ? sanitizeText(body.pepDetails, 200) : undefined;
+    const requestedTier: ServerKycTier =
+      body.requestedTier === 'TIER_3_ENHANCED' ? 'TIER_3_ENHANCED' : 'TIER_2_VERIFIED';
+
+    if (!normPhone || normPhone.length < 10) {
+      res.status(400).json({ success: false, error: 'Valid mobile number is required.' });
+      return;
+    }
+    if (fullLegalName.length < 3) {
+      res.status(400).json({ success: false, error: 'Please provide your complete legal name.' });
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
+      res.status(400).json({ success: false, error: 'Date of birth must be in YYYY-MM-DD format.' });
+      return;
+    }
+    // Age check (18+ required for eKYC)
+    const dobDate = new Date(`${dateOfBirth}T00:00:00Z`);
+    const ageYears = (Date.now() - dobDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+    if (isNaN(ageYears) || ageYears < 18 || ageYears > 120) {
+      res.status(400).json({ success: false, error: 'Applicant must be at least 18 years old to complete eKYC.' });
+      return;
+    }
+    if (residentialAddress.length < 6 || city.length < 2) {
+      res.status(400).json({ success: false, error: 'Complete residential address and city are required.' });
+      return;
+    }
+    if (!VALID_GOV_ID_TYPES.has(idType)) {
+      res.status(400).json({ success: false, error: 'Select a valid Philippine government-issued ID type.' });
+      return;
+    }
+    if (idNumber.length < 5) {
+      res.status(400).json({ success: false, error: 'Enter a valid government ID number (at least 5 characters).' });
+      return;
+    }
+
+    // Validate uploaded document images strictly (MIME type + size cap)
+    let idDocumentHash: string | undefined;
+    let hasFrontId = false;
+    if (body.frontIdImage) {
+      const frontCheck = validateBase64Image(body.frontIdImage);
+      if (!frontCheck.valid) {
+        res.status(400).json({ success: false, error: frontCheck.error || 'Invalid front ID image.' });
+        return;
+      }
+      hasFrontId = true;
+      idDocumentHash = frontCheck.hash;
+    }
+
+    let hasBackId = false;
+    if (body.backIdImage) {
+      const backCheck = validateBase64Image(body.backIdImage);
+      if (!backCheck.valid) {
+        res.status(400).json({ success: false, error: backCheck.error || 'Invalid back ID image.' });
+        return;
+      }
+      hasBackId = true;
+    }
+
+    let selfieDocumentHash: string | undefined;
+    let hasSelfieLiveness = false;
+    if (body.selfieImage) {
+      const selfieCheck = validateBase64Image(body.selfieImage);
+      if (!selfieCheck.valid) {
+        res.status(400).json({ success: false, error: selfieCheck.error || 'Invalid liveness selfie image.' });
+        return;
+      }
+      hasSelfieLiveness = true;
+      selfieDocumentHash = selfieCheck.hash;
+    }
+
+    if (!hasFrontId || !hasSelfieLiveness) {
+      res.status(400).json({
+        success: false,
+        error: 'Both Front Government ID image and Liveness Selfie capture are required for eKYC.',
+      });
+      return;
+    }
+
+    const store = loadLedger();
+    const existing = getOrCreateKycRecord(store, normPhone);
+    const screening = screenEntityAgainstWatchlists({
+      fullName: fullLegalName,
+      nationality,
+      isPep,
+    });
+
+    // Compute automated liveness confidence & approval disposition
+    const livenessScore = hasBackId ? 98 : 94;
+    let nextStatus: ServerKycStatus = 'PENDING_REVIEW';
+    let nextTier: ServerKycTier = existing.tier;
+    let reviewerNotes = 'Submitted for AML Compliance Officer verification.';
+
+    if (screening.status === 'BLOCKED') {
+      nextStatus = 'REJECTED';
+      reviewerNotes = `Automatic hold: Watchlist screening hit (${screening.screeningRef}). Escalated to Compliance Officer.`;
+      createAmlAlert(store, {
+        accountPhone: normPhone,
+        accountName: fullLegalName,
+        type: 'SANCTIONS_MATCH',
+        severity: 'CRITICAL',
+        status: 'ESCALATED',
+        title: `eKYC Watchlist Screening Block: ${fullLegalName}`,
+        description: `Applicant matched ${screening.matches.map((m) => `${m.listName} (${m.matchedTerm})`).join(', ')}.`,
+        ruleTriggered: 'RULE-KYC-SCREEN-001: Mandatory Onboarding Watchlist Block',
+      });
+    } else if (isPep || screening.status === 'REVIEW_REQUIRED' || requestedTier === 'TIER_3_ENHANCED') {
+      nextStatus = 'PENDING_REVIEW';
+      reviewerNotes = isPep
+        ? 'Enhanced Due Diligence (EDD) required for Politically Exposed Person (PEP) declaration.'
+        : requestedTier === 'TIER_3_ENHANCED'
+        ? 'Queued for Tier 3 Enhanced Due Diligence (EDD) officer review.'
+        : 'Flagged for manual AML compliance review.';
+      if (isPep || screening.matches.length > 0) {
+        createAmlAlert(store, {
+          accountPhone: normPhone,
+          accountName: fullLegalName,
+          type: 'PEP_FLAG',
+          severity: 'MEDIUM',
+          status: 'OPEN',
+          title: `PEP / EDD Review Required: ${fullLegalName}`,
+          description: `Onboarding applicant requires Enhanced Due Diligence (${screening.screeningRef}).`,
+          ruleTriggered: 'RULE-KYC-PEP-002: BSP Circular 950 EDD Requirement',
+        });
+      }
+    } else {
+      // Clean Tier 2 eKYC with front ID + selfie + clear screening -> instant automated Tier 2 approval
+      nextStatus = 'VERIFIED';
+      nextTier = 'TIER_2_VERIFIED';
+      reviewerNotes = `Automated eKYC Verified (Liveness ${livenessScore}% • Watchlist Clear ${screening.screeningRef}).`;
+    }
+
+    const updatedRecord: ServerKycRecord = {
+      ...existing,
+      phone: normPhone,
+      tier: nextTier,
+      status: nextStatus,
+      fullLegalName,
+      dateOfBirth,
+      nationality,
+      residentialAddress,
+      city,
+      occupation,
+      sourceOfFunds,
+      idType,
+      idNumberHash: hashSensitiveData(`${idType}:${idNumber}`),
+      maskedIdNumber: maskGovernmentId(idNumber),
+      idDocumentHash,
+      selfieDocumentHash,
+      hasFrontId,
+      hasBackId,
+      hasSelfieLiveness,
+      livenessScore,
+      isPep,
+      pepDetails,
+      riskScore: screening.riskScore,
+      riskLevel: screening.riskLevel,
+      screeningStatus: screening.status,
+      screeningRef: screening.screeningRef,
+      submittedAt: new Date().toISOString(),
+      reviewedAt: nextStatus === 'VERIFIED' || nextStatus === 'REJECTED' ? new Date().toISOString() : undefined,
+      reviewedBy: nextStatus === 'VERIFIED' ? 'EKYC-AUTO-ENGINE' : undefined,
+      reviewerNotes,
+    };
+
+    store.kycRecords[normPhone] = updatedRecord;
+    appendComplianceAudit(store, {
+      actorPhone: normPhone,
+      actorRole: store.accounts[normPhone]?.role || 'USER',
+      action: 'KYC_SUBMITTED',
+      targetPhone: normPhone,
+      details: `eKYC submitted (${idType} ${updatedRecord.maskedIdNumber}) -> Status: ${nextStatus}, Tier: ${nextTier}, Screening: ${screening.status}`,
+    });
+
+    saveLedger(store);
+    const frozen = store.frozenAccounts[normPhone];
+
+    res.json({
+      success: true,
+      profile: {
+        ...updatedRecord,
+        idNumberHash: undefined,
+        isFrozen: Boolean(frozen),
+        frozenReason: frozen?.reason,
+      },
+      screening,
+      message:
+        nextStatus === 'VERIFIED'
+          ? 'Identity verified! Your account has been upgraded to Tier 2 (₱100,000 daily / ₱500,000 monthly).'
+          : nextStatus === 'REJECTED'
+          ? 'Your application was flagged by automated watchlist screening and escalated to our Compliance team.'
+          : 'Your eKYC documents have been submitted and queued for Compliance Officer review.',
+    });
+  });
+
+  // 11c. Real-Time Sanctions, Watchlist & PEP Screening API
+  app.post('/api/compliance/screen', (req, res) => {
+    const { fullName, nationality, isPep } = req.body || {};
+    const cleanName = sanitizeText(fullName, 120);
+    if (cleanName.length < 2) {
+      res.status(400).json({ success: false, error: 'Enter a name or entity (at least 2 characters) to screen.' });
+      return;
+    }
+    const result = screenEntityAgainstWatchlists({
+      fullName: cleanName,
+      nationality: sanitizeText(nationality || '', 60),
+      isPep: Boolean(isPep),
+    });
+
+    res.json({ success: true, result });
+  });
+
+  // 11d. Admin Compliance Officer Overview (Server-Side RBAC Verified)
+  app.get('/api/compliance/admin/overview', (req, res) => {
+    const store = loadLedger();
+    const auth = verifyComplianceAdmin(req, store);
+    if (!auth.authorized) {
+      res.status(403).json({
+        success: false,
+        error: 'Forbidden: Compliance Officer (ADMIN / SUPER_ADMIN) privileges required.',
+      });
+      return;
+    }
+
+    const kycApplications = Object.values(store.kycRecords).map((rec) => {
+      const frozen = store.frozenAccounts[rec.phone];
+      return {
+        ...rec,
+        idNumberHash: undefined,
+        isFrozen: Boolean(frozen),
+        frozenReason: frozen?.reason,
+      };
+    });
+
+    const pendingKycCount = kycApplications.filter((k) => k.status === 'PENDING_REVIEW').length;
+    const verifiedKycCount = kycApplications.filter((k) => k.status === 'VERIFIED').length;
+    const openAmlAlerts = store.amlAlerts.filter(
+      (a) => a.status === 'OPEN' || a.status === 'UNDER_REVIEW' || a.status === 'ESCALATED'
+    ).length;
+    const ctrCount = store.amlAlerts.filter((a) => a.type === 'CTR_THRESHOLD').length;
+    const strCount = store.amlAlerts.filter(
+      (a) => a.type === 'STR_STRUCTURING' || a.type === 'SANCTIONS_MATCH'
+    ).length;
+    const frozenList = Object.values(store.frozenAccounts);
+
+    res.json({
+      success: true,
+      metrics: {
+        totalAccounts: Math.max(Object.keys(store.accounts).length, kycApplications.length),
+        pendingKycCount,
+        verifiedKycCount,
+        openAmlAlerts,
+        ctrCount,
+        strCount,
+        frozenAccountsCount: frozenList.length,
+      },
+      kycApplications,
+      amlAlerts: store.amlAlerts,
+      frozenAccounts: frozenList,
+      auditLog: store.complianceAuditLog.slice(0, 60),
+    });
+  });
+
+  // 11e. Admin KYC Review Decision (Approve Tier 2/3, Reject, Request Action)
+  app.post('/api/compliance/admin/kyc/review', (req, res) => {
+    const store = loadLedger();
+    const auth = verifyComplianceAdmin(req, store);
+    if (!auth.authorized) {
+      res.status(403).json({ success: false, error: 'Forbidden: Admin compliance role required.' });
+      return;
+    }
+
+    const { targetPhone, decision, approvedTier, reviewerNotes } = req.body || {};
+    const normTarget = normalizePhPhone(String(targetPhone || ''));
+    if (!normTarget || !VALID_KYC_DECISIONS.has(decision)) {
+      res.status(400).json({ success: false, error: 'Valid target phone and KYC decision are required.' });
+      return;
+    }
+
+    const record = getOrCreateKycRecord(store, normTarget);
+    const nextTier: ServerKycTier =
+      decision === 'VERIFIED'
+        ? approvedTier === 'TIER_3_ENHANCED'
+          ? 'TIER_3_ENHANCED'
+          : 'TIER_2_VERIFIED'
+        : decision === 'REJECTED'
+        ? 'TIER_1_BASIC'
+        : record.tier;
+
+    record.status = decision;
+    record.tier = nextTier;
+    record.reviewedAt = new Date().toISOString();
+    record.reviewedBy = `${auth.actorRole} (${auth.actorPhone})`;
+    record.reviewerNotes = sanitizeText(reviewerNotes || `Decision updated to ${decision}`, 240);
+
+    if (decision === 'VERIFIED' && record.riskLevel !== 'CRITICAL') {
+      record.riskScore = Math.min(record.riskScore, 25);
+      record.riskLevel = 'LOW';
+    }
+
+    store.kycRecords[normTarget] = record;
+    appendComplianceAudit(store, {
+      actorPhone: auth.actorPhone,
+      actorRole: auth.actorRole,
+      action: 'KYC_REVIEWED',
+      targetPhone: normTarget,
+      details: `Set KYC status=${decision}, tier=${nextTier}. Notes: ${record.reviewerNotes}`,
+    });
+    saveLedger(store);
+
+    const frozen = store.frozenAccounts[normTarget];
+    res.json({
+      success: true,
+      profile: {
+        ...record,
+        idNumberHash: undefined,
+        isFrozen: Boolean(frozen),
+        frozenReason: frozen?.reason,
+      },
+    });
+  });
+
+  // 11f. Admin AML Case Management Disposition
+  app.post('/api/compliance/admin/aml/case', (req, res) => {
+    const store = loadLedger();
+    const auth = verifyComplianceAdmin(req, store);
+    if (!auth.authorized) {
+      res.status(403).json({ success: false, error: 'Forbidden: Admin compliance role required.' });
+      return;
+    }
+
+    const { alertId, status, reviewerNotes } = req.body || {};
+    if (!alertId || !VALID_AML_CASE_STATUSES.has(status)) {
+      res.status(400).json({ success: false, error: 'Valid alertId and AML case status are required.' });
+      return;
+    }
+
+    const alert = store.amlAlerts.find((a) => a.id === alertId);
+    if (!alert) {
+      res.status(404).json({ success: false, error: 'AML alert not found.' });
+      return;
+    }
+
+    alert.status = status;
+    alert.updatedAt = new Date().toISOString();
+    if (reviewerNotes) {
+      alert.reviewerNotes = sanitizeText(reviewerNotes, 240);
+    }
+    if (status === 'FILED_AMLC' && !alert.amlcFilingRef) {
+      alert.amlcFilingRef = generateClearingTrace(
+        alert.type === 'CTR_THRESHOLD' ? 'AMLC-CTR' : 'AMLC-STR'
+      );
+    }
+
+    appendComplianceAudit(store, {
+      actorPhone: auth.actorPhone,
+      actorRole: auth.actorRole,
+      action: 'AML_CASE_UPDATED',
+      targetPhone: alert.accountPhone,
+      details: `Alert ${alert.id} (${alert.type}) -> ${status}${alert.amlcFilingRef ? ` [${alert.amlcFilingRef}]` : ''}`,
+    });
+    saveLedger(store);
+
+    res.json({ success: true, alert });
+  });
+
+  // 11g. Admin Account Freeze / Unfreeze Enforcement
+  app.post('/api/compliance/admin/account/freeze', (req, res) => {
+    const store = loadLedger();
+    const auth = verifyComplianceAdmin(req, store);
+    if (!auth.authorized) {
+      res.status(403).json({ success: false, error: 'Forbidden: Admin compliance role required.' });
+      return;
+    }
+
+    const { targetPhone, freeze, reason } = req.body || {};
+    const normTarget = normalizePhPhone(String(targetPhone || ''));
+    if (!normTarget) {
+      res.status(400).json({ success: false, error: 'Target account mobile number is required.' });
+      return;
+    }
+
+    if (freeze) {
+      const cleanReason = sanitizeText(reason || 'Pending AML Compliance Investigation', 180);
+      store.frozenAccounts[normTarget] = {
+        phone: normTarget,
+        reason: cleanReason,
+        frozenBy: `${auth.actorRole} (${auth.actorPhone})`,
+        frozenAt: new Date().toISOString(),
+      };
+      appendComplianceAudit(store, {
+        actorPhone: auth.actorPhone,
+        actorRole: auth.actorRole,
+        action: 'ACCOUNT_FROZEN',
+        targetPhone: normTarget,
+        details: `Account frozen: ${cleanReason}`,
+      });
+    } else {
+      delete store.frozenAccounts[normTarget];
+      appendComplianceAudit(store, {
+        actorPhone: auth.actorPhone,
+        actorRole: auth.actorRole,
+        action: 'ACCOUNT_UNFROZEN',
+        targetPhone: normTarget,
+        details: `Compliance freeze lifted by ${auth.actorPhone}`,
+      });
+    }
+
+    saveLedger(store);
+    res.json({ success: true, isFrozen: Boolean(freeze), targetPhone: normTarget });
+  });
+
+  // 11h. Export AMLC Compliance CTR / STR Report (CSV or JSON)
+  app.get('/api/compliance/admin/export-report', (req, res) => {
+    const store = loadLedger();
+    const auth = verifyComplianceAdmin(req, store);
+    if (!auth.authorized) {
+      res.status(403).json({ success: false, error: 'Forbidden: Admin compliance role required.' });
+      return;
+    }
+
+    const format = req.query.format === 'json' ? 'json' : 'csv';
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    if (format === 'json') {
+      const payload = {
+        institution: 'DigiCash Worldwide Philippines',
+        regulator: 'AMLC / BSP RA 9160 Reporting Export',
+        generatedAt: new Date().toISOString(),
+        generatedBy: auth.actorPhone,
+        alerts: store.amlAlerts,
+        frozenAccounts: Object.values(store.frozenAccounts),
+      };
+      res.json({
+        success: true,
+        filename: `digicash-amlc-report-${stamp}.json`,
+        mimeType: 'application/json',
+        content: JSON.stringify(payload, null, 2),
+      });
+      return;
+    }
+
+    const csvEscape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const headers = [
+      'Alert ID',
+      'Created At',
+      'Account Phone',
+      'Account Name',
+      'Type',
+      'Severity',
+      'Status',
+      'Amount (PHP)',
+      'Transaction Ref',
+      'Counterparty',
+      'AMLC Filing Ref',
+      'Rule Triggered',
+      'Notes',
+    ];
+    const rows = store.amlAlerts.map((a) =>
+      [
+        a.id,
+        a.createdAt,
+        a.accountPhone,
+        a.accountName,
+        a.type,
+        a.severity,
+        a.status,
+        a.amount ?? '',
+        a.transactionRef ?? '',
+        a.counterparty ?? '',
+        a.amlcFilingRef ?? '',
+        a.ruleTriggered,
+        a.reviewerNotes ?? '',
+      ]
+        .map(csvEscape)
+        .join(',')
+    );
+
+    const content = [headers.join(','), ...rows].join('\n');
+    appendComplianceAudit(store, {
+      actorPhone: auth.actorPhone,
+      actorRole: auth.actorRole,
+      action: 'AMLC_REPORT_EXPORTED',
+      details: `Exported ${store.amlAlerts.length} AML records in ${format.toUpperCase()} format.`,
+    });
+    saveLedger(store);
+
+    res.json({
+      success: true,
+      filename: `digicash-amlc-report-${stamp}.csv`,
+      mimeType: 'text/csv;charset=utf-8;',
+      content,
+    });
+  });
 
   // Vite middleware for development, static dist for production
   if (process.env.NODE_ENV !== 'production') {

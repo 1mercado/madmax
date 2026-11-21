@@ -17,6 +17,7 @@ import {
   Receipt,
   Rocket,
   Send,
+  ShieldCheck,
   Sliders,
   Sparkles,
   Smartphone,
@@ -49,6 +50,9 @@ export const HomeScreen: React.FC = () => {
     unreadNotificationCount,
     setIsNotificationCenterOpen,
     pushSettings,
+    kycProfile,
+    kycLimits,
+    complianceUsage,
   } = useDigiCash();
 
   const [isBalanceHidden, setIsBalanceHidden] = useState(false);
@@ -271,6 +275,49 @@ export const HomeScreen: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* 2b. KYC & AML Verification Status Bar */}
+      <button
+        type="button"
+        onClick={() => navigateTo('KYC_COMPLIANCE')}
+        className={`w-full rounded-2xl p-3.5 border flex items-center justify-between gap-3 text-left transition-colors ${
+          kycProfile.isFrozen
+            ? 'bg-rose-950/60 border-rose-500/60 hover:border-rose-400'
+            : kycProfile.status === 'VERIFIED'
+            ? 'bg-[#081d38] border-[#00f5a0]/35 hover:border-[#00f5a0]'
+            : 'bg-[#081d38] border-amber-400/45 hover:border-amber-300'
+        }`}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div
+            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+              kycProfile.isFrozen
+                ? 'bg-rose-500/20 text-rose-400'
+                : kycProfile.status === 'VERIFIED'
+                ? 'bg-[#00f5a0]/15 text-[#00f5a0]'
+                : 'bg-amber-400/15 text-amber-300'
+            }`}
+          >
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-white truncate">
+              {kycProfile.isFrozen
+                ? 'Account Compliance Hold Active'
+                : `${kycLimits.label} · ${kycProfile.status.replace('_', ' ')}`}
+            </div>
+            <div className="text-[11px] text-slate-300 truncate tabular-nums">
+              {kycProfile.isFrozen
+                ? kycProfile.frozenReason || 'Tap to view AML compliance details'
+                : `Daily remaining: ₱${complianceUsage.dailyRemaining.toLocaleString()} of ₱${kycLimits.dailyOutgoingLimit.toLocaleString()} · AML Protected`}
+            </div>
+          </div>
+        </div>
+        <span className="text-xs font-bold text-[#00e5ff] whitespace-nowrap shrink-0 flex items-center gap-1">
+          <span>{kycProfile.status === 'VERIFIED' ? 'Compliance' : 'Verify KYC'}</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </span>
+      </button>
 
       {/* 3. Quick Actions Section */}
       <div className="space-y-3">
