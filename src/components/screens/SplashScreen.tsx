@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import {
   AlertCircle,
+  ArrowLeft,
   Check,
   CheckCircle2,
   Copy,
-  CreditCard,
   ExternalLink,
   Eye,
   EyeOff,
@@ -15,8 +15,6 @@ import {
   QrCode,
   RefreshCw,
   ShieldCheck,
-  Smartphone,
-  Sparkles,
   Sun,
   User,
   Users,
@@ -24,6 +22,7 @@ import {
 } from 'lucide-react';
 import { DigiCashLogo } from '../common/DigiCashLogo';
 import { GlassCard } from '../common/GlassCard';
+import { LottieSuccessAnimation } from '../common/LottieSuccessAnimation';
 import { useDigiCash } from '../../context/DigiCashContext';
 import { playCyberSound } from '../../utils/biometrics';
 
@@ -43,15 +42,17 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
     signInWithOtp,
     sendSmsOtp,
     registeredAccounts,
-    userProfile,
-    quickBalanceEnabled,
+    currentDestination,
+    navigateTo,
     theme,
     toggleTheme,
   } = useDigiCash();
 
+  const [viewStep, setViewStep] = useState<'SPLASH' | 'AUTH'>(
+    currentDestination === 'LOGIN' ? 'AUTH' : 'SPLASH'
+  );
   const [mode, setMode] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
   const [loginMethod, setLoginMethod] = useState<'MPIN' | 'OTP'>('MPIN');
-  const [peekBalanceVisible, setPeekBalanceVisible] = useState(true);
 
   // Login Form States
   const [loginPhone, setLoginPhone] = useState('09171234567');
@@ -287,22 +288,50 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
   const isLight = theme === 'light';
 
   return (
-    <div className={`relative w-full min-h-screen overflow-x-hidden flex flex-col justify-between p-4 sm:p-6 transition-colors duration-200 ${isLight ? 'bg-slate-100 text-[#090d16]' : 'bg-[#01142f] text-white'}`}>
+    <div className={`relative w-full min-h-[100dvh] overflow-x-hidden flex flex-col justify-between p-4 sm:p-6 transition-colors duration-200 ${isLight ? 'bg-slate-100 text-[#090d16]' : 'bg-[#01142f] text-white'}`}>
       {/* High-Res Earth Cyber Backdrop with Theme Awareness */}
       <div
-        className={`absolute inset-0 z-0 bg-cover bg-center transition-opacity duration-300 ${isLight ? 'opacity-20 mix-blend-multiply' : 'opacity-80'}`}
+        className={`absolute inset-0 z-0 bg-cover bg-bottom sm:bg-center transition-opacity duration-300 ${isLight ? 'opacity-25 mix-blend-multiply' : 'opacity-90'}`}
         style={{ backgroundImage: `url('/assets/img_earth_backdrop.jpg')` }}
       />
 
       {/* Atmospheric glow gradients */}
-      <div className={`absolute inset-0 z-0 pointer-events-none ${isLight ? 'bg-gradient-to-t from-slate-100/90 via-slate-100/50 to-white/70' : 'bg-gradient-to-t from-[#01142f]/90 via-transparent to-[#01142f]/50'}`} />
+      <div
+        className={`absolute inset-0 z-0 pointer-events-none ${
+          isLight
+            ? 'bg-gradient-to-b from-white/80 via-slate-100/40 to-slate-100/90'
+            : viewStep === 'SPLASH'
+            ? 'bg-gradient-to-b from-[#01142f]/95 via-[#01142f]/40 to-[#01142f]/90'
+            : 'bg-gradient-to-t from-[#01142f]/90 via-transparent to-[#01142f]/50'
+        }`}
+      />
 
-      {/* Top Floating Utility Bar (Theme Toggle & APK Download) */}
-      <div className="relative z-20 flex items-center justify-between w-full max-w-md mx-auto pt-1 pb-3">
+      {/* Top Floating Utility Bar */}
+      <div className="relative z-20 flex items-center justify-between w-full max-w-md mx-auto pt-1 pb-2">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-extrabold tracking-widest uppercase px-2 py-0.5 rounded-full border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
-            OFFICIAL v3.2
-          </span>
+          {viewStep === 'AUTH' ? (
+            <button
+              type="button"
+              onClick={() => {
+                setViewStep('SPLASH');
+                navigateTo('SPLASH');
+                setErrorMessage(null);
+                setSuccessBanner(null);
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                isLight
+                  ? 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                  : 'bg-[#081f3d]/90 text-white border-[#00e5ff]/30 hover:bg-[#0d2a52]'
+              }`}
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Splash</span>
+            </button>
+          ) : (
+            <span className="text-[10px] font-extrabold tracking-widest uppercase px-2.5 py-0.5 rounded-full border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+              WORLDWIDE
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -331,68 +360,118 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
         </div>
       </div>
 
-      {/* Center 1-Page Splash & Login Content */}
-      <div className="relative z-10 w-full max-w-md mx-auto my-auto space-y-4 py-2">
-        {/* Brand Banner */}
-        <div className="flex flex-col items-center text-center">
-          <DigiCashLogo size={76} showGlow={true} className="mb-2" />
+      {/* STEP 1: DEFAULT DIGICASH WORLDWIDE SPLASH SCREEN (When no one is logged in) */}
+      {viewStep === 'SPLASH' ? (
+        <div className="relative z-10 w-full max-w-md mx-auto flex-1 flex flex-col justify-between py-6 sm:py-10">
+          {/* Top / Center Hero Branding */}
+          <div className="flex flex-col items-center text-center mt-4 sm:mt-8">
+            <DigiCashLogo size={120} showGlow={true} className="mb-4" />
 
-          <div className="flex items-center justify-center text-3xl font-black tracking-tight mb-0.5">
-            <span className={isLight ? 'text-slate-900' : 'text-white'}>Digi</span>
-            <span className={isLight ? 'text-emerald-600' : 'text-[#00f5a0]'}>Cash</span>
-          </div>
-
-          <div className={`text-[10px] font-bold tracking-[0.4em] uppercase mb-1 ${isLight ? 'text-sky-700' : 'text-[#00e5ff]'}`}>
-            WORLDWIDE
-          </div>
-
-          <p className={`text-sm font-semibold ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>
-            Your Money, <span className={isLight ? 'text-emerald-600 font-bold' : 'text-[#00f5a0] font-bold'}>Made Easier.</span>
-          </p>
-        </div>
-
-        {/* Quick Balance Peek Widget (If Enabled) */}
-        {quickBalanceEnabled && (
-          <GlassCard className="p-3.5 rounded-2xl border-dashed">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CreditCard className={`w-4 h-4 ${isLight ? 'text-sky-600' : 'text-[#00e5ff]'}`} />
-                <div>
-                  <div className={`text-[10px] font-bold uppercase tracking-wider ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Quick Balance (Unlocked Peek)
-                  </div>
-                  <div className="text-sm font-black">
-                    {peekBalanceVisible ? (
-                      <span className={isLight ? 'text-slate-900 font-mono' : 'text-white font-mono'}>
-                        ₱{userProfile.balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                      </span>
-                    ) : (
-                      <span className={isLight ? 'text-slate-400' : 'text-slate-500'}>••••••••</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => setPeekBalanceVisible(!peekBalanceVisible)}
-                className={`p-1.5 rounded-lg transition-colors ${isLight ? 'hover:bg-slate-200 text-slate-600' : 'hover:bg-white/10 text-slate-300'}`}
-                title={peekBalanceVisible ? 'Hide Balance' : 'Show Balance'}
+            <div className="flex items-center justify-center text-5xl sm:text-6xl font-black tracking-tight mb-2">
+              <span className={isLight ? 'text-slate-900' : 'text-white drop-shadow-[0_2px_12px_rgba(255,255,255,0.2)]'}>
+                Digi
+              </span>
+              <span
+                className={
+                  isLight
+                    ? 'text-emerald-600'
+                    : 'bg-gradient-to-r from-[#00e5ff] via-[#00f5a0] to-[#88f953] bg-clip-text text-transparent drop-shadow-[0_2px_16px_rgba(0,245,160,0.35)]'
+                }
               >
-                {peekBalanceVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
+                Cash
+              </span>
             </div>
-          </GlassCard>
-        )}
 
-        {/* Unified Login / Register Card */}
-        <GlassCard className="p-5 sm:p-6 rounded-3xl shadow-2xl relative overflow-hidden">
-          {/* Mode Switcher Tabs */}
-          <div className={`grid grid-cols-2 p-1 rounded-2xl mb-4 border ${isLight ? 'bg-slate-200/80 border-slate-300' : 'bg-[#031329] border-[#00e5ff]/20'}`}>
+            <div
+              className={`text-xs sm:text-sm font-bold tracking-[0.55em] uppercase mb-7 pl-2 ${
+                isLight ? 'text-sky-800' : 'text-slate-200'
+              }`}
+            >
+              WORLDWIDE
+            </div>
+
+            <h1 className="text-2xl sm:text-3xl font-extrabold leading-tight tracking-tight">
+              <span className={`block ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                Your Money,
+              </span>
+              <span
+                className={`block mt-0.5 ${
+                  isLight
+                    ? 'text-emerald-600'
+                    : 'bg-gradient-to-r from-[#00f5a0] to-[#00e5ff] bg-clip-text text-transparent'
+                }`}
+              >
+                Made Easier.
+              </span>
+            </h1>
+          </div>
+
+          {/* Bottom Splash Action Buttons (Get Started & Login) */}
+          <div className="w-full space-y-3.5 mt-auto pt-12 pb-2">
             <button
+              type="button"
               onClick={() => {
-                setMode('LOGIN');
+                playCyberSound('click');
+                setMode('SIGNUP');
+                setViewStep('AUTH');
                 setErrorMessage(null);
                 setSuccessBanner(null);
               }}
+              className="w-full py-4 rounded-full font-extrabold text-base tracking-wide text-[#00222b] bg-gradient-to-r from-[#88f953] via-[#00f5a0] to-[#00e5ff] shadow-[0_0_28px_rgba(0,245,160,0.45)] hover:brightness-105 active:scale-[0.98] transition-all"
+            >
+              Get Started
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                playCyberSound('click');
+                setMode('LOGIN');
+                setViewStep('AUTH');
+                setErrorMessage(null);
+                setSuccessBanner(null);
+              }}
+              className={`w-full py-4 rounded-full font-bold text-base tracking-wide border transition-all active:scale-[0.98] backdrop-blur-md ${
+                isLight
+                  ? 'bg-white/90 border-sky-500 text-sky-700 hover:bg-sky-50 shadow-sm'
+                  : 'bg-[#02122c]/75 border-[#00e5ff]/60 text-[#00e5ff] hover:bg-[#051d42]/90 shadow-[0_0_20px_rgba(0,229,255,0.2)]'
+              }`}
+            >
+              Login
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* STEP 2: AUTHENTICATION (Login / Create Account) */
+        <div className="relative z-10 w-full max-w-md mx-auto my-auto space-y-4 py-2">
+          {/* Brand Banner */}
+          <div className="flex flex-col items-center text-center">
+            <DigiCashLogo size={72} showGlow={true} className="mb-1.5" />
+
+            <div className="flex items-center justify-center text-3xl font-black tracking-tight mb-0.5">
+              <span className={isLight ? 'text-slate-900' : 'text-white'}>Digi</span>
+              <span className={isLight ? 'text-emerald-600' : 'text-[#00f5a0]'}>Cash</span>
+            </div>
+
+            <div className={`text-[10px] font-bold tracking-[0.4em] uppercase mb-1 ${isLight ? 'text-sky-700' : 'text-[#00e5ff]'}`}>
+              WORLDWIDE
+            </div>
+
+            <p className={`text-sm font-semibold ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>
+              Your Money, <span className={isLight ? 'text-emerald-600 font-bold' : 'text-[#00f5a0] font-bold'}>Made Easier.</span>
+            </p>
+          </div>
+
+          {/* Unified Login / Register Card */}
+          <GlassCard className="p-5 sm:p-6 rounded-3xl shadow-2xl relative overflow-hidden">
+            {/* Mode Switcher Tabs */}
+            <div className={`grid grid-cols-2 p-1 rounded-2xl mb-4 border ${isLight ? 'bg-slate-200/80 border-slate-300' : 'bg-[#031329] border-[#00e5ff]/20'}`}>
+              <button
+                onClick={() => {
+                  setMode('LOGIN');
+                  setErrorMessage(null);
+                  setSuccessBanner(null);
+                }}
               className={`py-2 text-xs font-bold rounded-xl transition-all ${
                 mode === 'LOGIN'
                   ? isLight
@@ -605,7 +684,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
                     type="text"
                     value={signUpName}
                     onChange={(e) => setSignUpName(e.target.value)}
-                    placeholder="e.g. Juan dela Cruz"
+                    placeholder="Enter your full legal name"
                     required
                     className={`w-full bg-transparent text-sm font-semibold outline-none ${isLight ? 'text-slate-900 placeholder:text-slate-400' : 'text-white placeholder:text-slate-500'}`}
                   />
@@ -701,6 +780,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
           <span>PDIC Insured</span>
         </div>
       </div>
+      )}
 
       {/* SMS OTP Modal */}
       {showOtpModal && (
@@ -711,12 +791,12 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
               <h3 className="font-bold text-base">Verify SMS OTP</h3>
             </div>
             <p className="text-xs text-slate-400 mb-4">
-              We simulated sending an SMS to <strong>+63 {otpTargetPhone}</strong>.
+              Verification code dispatched to <strong>+63 {otpTargetPhone}</strong>.
             </p>
 
             <div className={`p-3 rounded-2xl border mb-4 text-xs ${isLight ? 'bg-sky-50 border-sky-200' : 'bg-[#031329] border-[#00e5ff]/20'}`}>
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                Simulated SMS Broadcast:
+                DigiCash SMS Security Gateway:
               </div>
               <div className="font-mono text-xs text-emerald-400">
                 [DigiCash Security] Code: <strong>{pendingOtpCode}</strong>
@@ -862,16 +942,9 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
                   type="text"
                   value={gcashRefInput}
                   onChange={(e) => setGcashRefInput(e.target.value.replace(/\D/g, ''))}
-                  placeholder="e.g. 90284719203"
+                  placeholder="Enter 9–13 digit GCash Reference #"
                   className={`w-full bg-transparent text-sm font-mono font-bold outline-none ${isLight ? 'text-slate-900 placeholder:text-slate-400' : 'text-white placeholder:text-slate-500'}`}
                 />
-                <button
-                  type="button"
-                  onClick={() => setGcashRefInput(`9028${Math.floor(1000000 + Math.random() * 9000000)}`)}
-                  className={`text-[10px] px-2 py-1 rounded font-bold shrink-0 ${isLight ? 'bg-sky-100 text-sky-800' : 'bg-white/10 text-[#00e5ff]'}`}
-                >
-                  Generate Ref
-                </button>
               </div>
               {activationError && (
                 <p className="text-xs text-rose-400">{activationError}</p>
@@ -879,11 +952,19 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
             </div>
 
             {/* Actions */}
+            {activationSuccess && (
+              <div className="py-3 text-center">
+                <LottieSuccessAnimation size={72} variant="payment" />
+                <div className="text-xs font-bold text-[#00f5a0] mt-2">
+                  GCash ₱500 Payment Verified! Unlocking Wallet...
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               <button
                 type="button"
                 onClick={handleVerifyActivation}
-                disabled={isActivating}
+                disabled={isActivating || activationSuccess}
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-black text-sm shadow-lg flex items-center justify-center gap-2 active:scale-98"
               >
                 {isActivating ? (

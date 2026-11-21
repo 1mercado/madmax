@@ -21,7 +21,7 @@ export const USER_TIERS: Record<string, UserTierConfig> = {
     tier: 'VIP_1',
     title: 'VIP 1',
     price: 1000.0,
-    description: 'Julis Hate • Monthly Benefits • VIP Pool Split to Infinity',
+    description: 'Julius Hate • Monthly Benefits • VIP Pool Split to Infinity',
     badgeColor: '#FFB300',
     levelsUnlocked: 10,
   },
@@ -84,12 +84,12 @@ export function calculateCommission(amount: number, level: number): number {
 }
 
 export const INITIAL_USER: UserProfile = {
-  id: '09170000000',
+  id: '09171234567',
   name: 'Super Admin',
   email: 'superadmin@digicash.ph',
-  phone: '+63 917 000 0000',
-  balance: 0.0,
-  points: 100,
+  phone: '+63 917 123 4567',
+  balance: 25000.0,
+  points: 500,
   tier: 'BASIC',
   role: 'SUPER_ADMIN',
   isActivated: true,
@@ -111,18 +111,20 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [];
 export const INITIAL_NETWORK_MEMBERS: NetworkMember[] = [];
 
 export const BILLERS_LIST: Biller[] = [
-  { id: 'b1', name: 'MERALCO', category: 'Electricity', description: 'Manila Electric Company', fee: 0.0, code: 'MER' },
-  { id: 'b2', name: 'Maynilad', category: 'Water', description: 'Maynilad Water Services', fee: 0.0, code: 'MYN' },
+  { id: 'b1', name: 'MERALCO', category: 'Electricity', description: 'Manila Electric Company (Real-Time Posting)', fee: 0.0, code: 'MER' },
+  { id: 'b2', name: 'Maynilad', category: 'Water', description: 'Maynilad Water Services Inc.', fee: 0.0, code: 'MYN' },
   { id: 'b3', name: 'Manila Water', category: 'Water', description: 'Manila Water Company', fee: 0.0, code: 'MWC' },
-  { id: 'b4', name: 'PLDT Home', category: 'Internet', description: 'PLDT Landline & Fiber', fee: 0.0, code: 'PLDT' },
-  { id: 'b5', name: 'Globe At Home', category: 'Internet', description: 'Globe Postpaid & Broadband', fee: 0.0, code: 'GLB' },
-  { id: 'b6', name: 'Converge ICT', category: 'Internet', description: 'Converge FiberX', fee: 0.0, code: 'CNV' },
-  { id: 'b7', name: 'Sky Cable', category: 'Cable TV', description: 'Sky Cable & Broadband', fee: 0.0, code: 'SKY' },
-  { id: 'b8', name: 'Cignal TV', category: 'Cable TV', description: 'Cignal Postpaid / Prepaid', fee: 0.0, code: 'CIG' },
-  { id: 'b9', name: 'SSS Contributions', category: 'Government', description: 'Social Security System', fee: 10.0, code: 'SSS' },
-  { id: 'b10', name: 'PhilHealth', category: 'Government', description: 'Philippine Health Insurance', fee: 10.0, code: 'PHL' },
-  { id: 'b11', name: 'Pag-IBIG Fund', category: 'Government', description: 'Home Development Mutual Fund', fee: 10.0, code: 'HDMF' },
-  { id: 'b12', name: 'Home Credit', category: 'Loans', description: 'Home Credit Installments', fee: 15.0, code: 'HCD' },
+  { id: 'b4', name: 'PLDT Home', category: 'Internet', description: 'PLDT Landline & Fibr Broadband', fee: 0.0, code: 'PLDT' },
+  { id: 'b5', name: 'Globe At Home', category: 'Internet', description: 'Globe Postpaid & GFiber', fee: 0.0, code: 'GLB' },
+  { id: 'b6', name: 'Converge ICT', category: 'Internet', description: 'Converge FiberX Broadband', fee: 0.0, code: 'CNV' },
+  { id: 'b7', name: 'Sky Cable', category: 'Cable TV', description: 'Sky Cable & Sky Fiber', fee: 0.0, code: 'SKY' },
+  { id: 'b8', name: 'Cignal TV', category: 'Cable TV', description: 'Cignal Postpaid / Prepaid Direct', fee: 0.0, code: 'CIG' },
+  { id: 'b9', name: 'SSS Contributions', category: 'Government', description: 'Social Security System (PRN)', fee: 10.0, code: 'SSS' },
+  { id: 'b10', name: 'PhilHealth', category: 'Government', description: 'Philippine Health Insurance Corp.', fee: 10.0, code: 'PHL' },
+  { id: 'b11', name: 'Pag-IBIG Fund', category: 'Government', description: 'HDMF / MP2 Savings & Housing', fee: 10.0, code: 'HDMF' },
+  { id: 'b12', name: 'Home Credit', category: 'Loans', description: 'Home Credit Philippines Loans', fee: 15.0, code: 'HCD' },
+  { id: 'b13', name: 'Maya Credit / Loans', category: 'Loans', description: 'Maya Easy Credit & Personal Loan', fee: 0.0, code: 'MAYA' },
+  { id: 'b14', name: 'BDO Credit Cards', category: 'Loans', description: 'BDO Visa / Mastercard / Amex', fee: 0.0, code: 'BDOC' },
 ];
 
 export const REWARDS_CATALOG: RewardItem[] = [

@@ -77,6 +77,9 @@ export interface Transaction {
   fee: number;
   recipientOrBiller: string;
   breakdownNote?: string;
+  gatewayProvider?: string;
+  publicKeyId?: string;
+  signatureHash?: string;
 }
 
 export interface Biller {
@@ -188,3 +191,31 @@ export interface BiometricSecurityState {
   lastUnlockedAt: string | null;
   unlockHistory: Array<{ timestamp: string; method: 'biometrics' | 'mpin'; success: boolean }>;
 }
+
+export type PushNotificationCategory = 'INCOMING_TRANSFER' | 'BILL_PAYMENT' | 'SYSTEM';
+
+export interface AppNotification {
+  id: string;
+  category: PushNotificationCategory;
+  title: string;
+  body: string;
+  amount?: number;
+  referenceNumber?: string;
+  transactionId?: string;
+  recipientOrSender?: string;
+  gatewayProvider?: string;
+  timestamp: string;
+  createdAt: number;
+  read: boolean;
+  deliveredViaPush: boolean;
+  wasBackgrounded: boolean;
+}
+
+export interface PushNotificationSettings {
+  enabled: boolean;
+  incomingTransfers: boolean;
+  billPayments: boolean;
+  backgroundSync: boolean;
+  soundAlerts: boolean;
+}
+

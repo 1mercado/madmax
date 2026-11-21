@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  BellRing,
   Check,
   ChevronRight,
   HelpCircle,
@@ -23,8 +24,6 @@ export const ProfileScreen: React.FC = () => {
     userProfile,
     setBottomTab,
     navigateTo,
-    quickBalanceEnabled,
-    setQuickBalanceEnabled,
     isBiometricsEnabled,
     toggleBiometrics,
     lockApp,
@@ -35,6 +34,9 @@ export const ProfileScreen: React.FC = () => {
     signOut,
     theme,
     toggleTheme,
+    pushSettings,
+    unreadNotificationCount,
+    setIsNotificationCenterOpen,
   } = useDigiCash();
 
   const [showAccountModal, setShowAccountModal] = useState(false);
@@ -108,6 +110,31 @@ export const ProfileScreen: React.FC = () => {
             <div>
               <div className="text-xs font-semibold text-white">Security & PIN</div>
               <div className="text-[11px] text-slate-400">6-Digit MPIN & Account Protection</div>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-400" />
+        </div>
+
+        {/* Browser Push Notifications & Background Alerts */}
+        <div
+          onClick={() => setIsNotificationCenterOpen(true)}
+          className="p-3.5 flex items-center justify-between cursor-pointer hover:bg-white/5 rounded-xl transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <BellRing className="w-5 h-5 text-[#00e5ff]" />
+            <div>
+              <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                <span>Browser Push Notifications</span>
+                {unreadNotificationCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-[#00f5a0] text-[#00222b] text-[9px] font-black">
+                    {unreadNotificationCount}
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                Incoming transfers & completed bills (Background Push{' '}
+                {pushSettings.enabled ? 'Active' : 'Off'})
+              </div>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-400" />
@@ -294,32 +321,6 @@ export const ProfileScreen: React.FC = () => {
                 </div>
               </div>
 
-              {/* Quick Balance Lock Screen Toggle */}
-              <div className="p-4 rounded-2xl bg-[#06172d] border border-[#00e5ff]/20 space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-white">Quick Balance Glance</span>
-                  <button
-                    type="button"
-                    onClick={() => setQuickBalanceEnabled(!quickBalanceEnabled)}
-                    className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      quickBalanceEnabled ? 'bg-[#00f5a0]' : 'bg-slate-700'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-[#00222b] shadow ring-0 transition duration-200 ease-in-out ${
-                        quickBalanceEnabled ? 'translate-x-5' : 'translate-x-0 bg-white'
-                      }`}
-                    />
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-300">
-                  Allow viewing your available wallet balance on the login screen without entering your MPIN or full password.
-                </p>
-                <div className="text-[10px] text-[#00f5a0] font-semibold">
-                  Status: {quickBalanceEnabled ? 'Enabled on Login Screen' : 'Disabled (MPIN required)'}
-                </div>
-              </div>
-
               {/* Phone OTP Verification */}
               <div className="p-4 rounded-2xl bg-[#06172d] border border-[#00e5ff]/20 space-y-1.5">
                 <div className="flex justify-between items-center">
@@ -336,11 +337,16 @@ export const ProfileScreen: React.FC = () => {
                 </p>
               </div>
 
-              {/* Zero-Trust Architecture */}
-              <div className="p-4 rounded-2xl bg-[#06172d] border border-[#00e5ff]/20 space-y-1.5">
-                <div className="text-xs font-bold text-white">Bank-Grade Encryption</div>
+              {/* Zero-Trust Architecture & Applied Public/Secret Keys */}
+              <div className="p-4 rounded-2xl bg-[#06172d] border border-[#00e5ff]/20 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-white">Fintech Public & Secret Keys</span>
+                  <span className="text-[10px] text-[#00f5a0] font-bold bg-[#00f5a0]/15 px-2 py-0.5 rounded">
+                    7/7 APPLIED
+                  </span>
+                </div>
                 <p className="text-[11px] text-slate-300">
-                  Transactions are protected with 256-bit SSL encryption, end-to-end ledger validation, and automated fraud monitoring.
+                  All client Public Keys and server Secret Keys (DigiCash Core, PayMongo GCash/QR Ph, Maya Bank, GoTyme InstaPay, Xendit Bank Rails, Telco Direct E-Load, and BancNet Billers) are bound and signed with HMAC-SHA256.
                 </p>
               </div>
             </div>

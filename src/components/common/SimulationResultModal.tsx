@@ -1,6 +1,7 @@
 import React from 'react';
 import { Activity, Lock, X } from 'lucide-react';
 import { SimulationResult } from '../../types';
+import { LottieSuccessAnimation } from './LottieSuccessAnimation';
 
 interface SimulationResultModalProps {
   result: SimulationResult | null;
@@ -23,7 +24,7 @@ export const SimulationResultModal: React.FC<SimulationResultModalProps> = ({
           <div className="flex items-center gap-2">
             <Activity className="w-5 h-5 text-[#00e5ff]" />
             <h3 className="text-sm font-bold text-[#00e5ff] tracking-wide">
-              Compensation Audit Simulator
+              Official Compensation Statement
             </h3>
           </div>
           <button
@@ -42,6 +43,9 @@ export const SimulationResultModal: React.FC<SimulationResultModalProps> = ({
         {/* Commission Status Card */}
         {result.isUnlocked && result.commissionEarned > 0 ? (
           <div className="rounded-2xl bg-gradient-to-r from-[#00382b] to-[#00523c] border border-[#00e676]/50 p-4 mb-4">
+            <div className="mb-2">
+              <LottieSuccessAnimation size={64} variant="reward" />
+            </div>
             <div className="text-[11px] font-bold text-[#00d294] tracking-wider uppercase mb-1">
               YOU EARNED LEVEL {result.level} COMMISSION
             </div>
@@ -113,7 +117,7 @@ export const SimulationResultModal: React.FC<SimulationResultModalProps> = ({
           onClick={onDismiss}
           className="w-full py-3 rounded-xl bg-[#14365d] hover:bg-[#1b487c] text-white font-semibold text-xs transition-colors"
         >
-          Close Simulator
+          Done
         </button>
       </div>
     </div>

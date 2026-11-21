@@ -1,32 +1,124 @@
-import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, Building, CheckCircle2, ChevronRight, Droplet, Lightbulb, QrCode, Receipt, Tv, Wifi } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bookmark,
+  Building,
+  CheckCircle2,
+  ChevronRight,
+  CreditCard,
+  Droplet,
+  Lightbulb,
+  Loader2,
+  QrCode,
+  Receipt,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Tv,
+  Wifi,
+} from 'lucide-react';
 import { useDigiCash } from '../../context/DigiCashContext';
 import { GlassCard } from '../common/GlassCard';
 import { Biller } from '../../types';
+import {
+  verifyBillStatement,
+  BillVerificationResult,
+  fetchWalletFromServer,
+  SavedBillerAccount,
+} from '../../services/fintechApi';
 
 export const PayBillsScreen: React.FC = () => {
   const { billers, userProfile, payBill, navigateTo } = useDigiCash();
 
   const categories = ['All', 'Electricity', 'Water', 'Internet', 'Cable TV', 'Government', 'Loans'];
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [activeBiller, setActiveBiller] = useState<Biller | null>(null);
 
   const [accountNumber, setAccountNumber] = useState('');
   const [amount, setAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const filteredBillers = selectedCategory === 'All'
-    ? billers
-    : billers.filter((b) => b.category === selectedCategory);
+  // Live Bill Verification states
+  const [verifyingBill, setVerifyingBill] = useState(false);
+  const [billVerification, setBillVerification] = useState<BillVerificationResult | null>(null);
+  const [savedBillers, setSavedBillers] = useState<SavedBillerAccount[]>([]);
+
+  useEffect(() => {
+    const phone = userProfile.phone || '09171234567';
+    fetchWalletFromServer(phone).then((res) => {
+      if (res.found && res.savedBillers && res.savedBillers.length > 0) {
+        setSavedBillers(res.savedBillers);
+      }
+    });
+  }, [userProfile.phone]);
+
+  // Automatically verify statement when account number is at least 6 chars
+  useEffect(() => {
+    if (!activeBiller) return;
+    const cleanAcc = accountNumber.trim();
+    if (cleanAcc.length < 6) {
+      setBillVerification(null);
+      return;
+    }
+
+    setVerifyingBill(true);
+    const timer = setTimeout(async () => {
+      const result = await verifyBillStatement({
+        billerCode: activeBiller.code,
+        billerName: activeBiller.name,
+        accountNumber: cleanAcc,
+      });
+      setBillVerification(result);
+      if (result.verified && result.statementAmount && !amount) {
+        setAmount(result.statementAmount.toFixed(2));
+      }
+      setVerifyingBill(false);
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [accountNumber, activeBiller]);
+
+  const filteredBillers = billers.filter((b) => {
+    if (selectedCategory !== 'All' && b.category !== selectedCategory) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      return (
+        b.name.toLowerCase().includes(q) ||
+        b.description.toLowerCase().includes(q) ||
+        b.category.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   const getBillerIcon = (cat: string) => {
     switch (cat) {
-      case 'Electricity': return <Lightbulb className="w-5 h-5 text-[#ffb300]" />;
-      case 'Water': return <Droplet className="w-5 h-5 text-[#00e5ff]" />;
-      case 'Internet': return <Wifi className="w-5 h-5 text-[#00f5a0]" />;
-      case 'Cable TV': return <Tv className="w-5 h-5 text-[#b06ab3]" />;
-      case 'Government': return <Building className="w-5 h-5 text-[#64b5f6]" />;
-      default: return <Receipt className="w-5 h-5 text-[#00e5ff]" />;
+      case 'Electricity':
+        return <Lightbulb className="w-5 h-5 text-[#ffb300]" />;
+      case 'Water':
+        return <Droplet className="w-5 h-5 text-[#00e5ff]" />;
+      case 'Internet':
+        return <Wifi className="w-5 h-5 text-[#00f5a0]" />;
+      case 'Cable TV':
+        return <Tv className="w-5 h-5 text-[#b06ab3]" />;
+      case 'Government':
+        return <Building className="w-5 h-5 text-[#64b5f6]" />;
+      case 'Loans':
+        return <CreditCard className="w-5 h-5 text-[#ff8a65]" />;
+      default:
+        return <Receipt className="w-5 h-5 text-[#00e5ff]" />;
+    }
+  };
+
+  const handleSelectSavedBiller = (saved: SavedBillerAccount) => {
+    const found = billers.find((b) => b.id === saved.billerId || b.code === saved.billerCode);
+    if (found) {
+      setActiveBiller(found);
+      setAccountNumber(saved.accountNumber);
+      setAmount('');
+      setError(null);
     }
   };
 
@@ -35,12 +127,12 @@ export const PayBillsScreen: React.FC = () => {
     if (!activeBiller) return;
     setError(null);
     const parsedAmount = parseFloat(amount);
-    if (!accountNumber.trim()) {
-      setError('Please enter your account number.');
+    if (!accountNumber.trim() || accountNumber.trim().length < 5) {
+      setError('Please enter a valid subscriber / account number (at least 5 characters).');
       return;
     }
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      setError('Please enter a valid amount.');
+      setError('Please enter a valid payment amount.');
       return;
     }
     if (parsedAmount + activeBiller.fee > userProfile.balance) {
@@ -48,7 +140,7 @@ export const PayBillsScreen: React.FC = () => {
       return;
     }
 
-    const res = payBill(activeBiller, accountNumber, parsedAmount);
+    const res = payBill(activeBiller, accountNumber.trim(), parsedAmount);
     if (!res.success) {
       setError(res.error || 'Payment failed.');
     } else {
@@ -68,7 +160,17 @@ export const PayBillsScreen: React.FC = () => {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="text-xl font-bold text-white">Pay Bills</h2>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-white">Pay Bills</h2>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#00f5a0]/15 text-[#00f5a0] border border-[#00f5a0]/30">
+                BancNet Billers Live
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300">
+              Real-time SOA Verification • GCash, Maya & GoTyme Biller Network
+            </p>
+          </div>
         </div>
         <button
           onClick={() => navigateTo('QR_SCANNER')}
@@ -78,6 +180,38 @@ export const PayBillsScreen: React.FC = () => {
           <span>Scan Bill QR</span>
         </button>
       </div>
+
+      {/* Saved Billers / Quick Pay Favorites */}
+      {savedBillers.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <Bookmark className="w-3.5 h-3.5 text-[#00f5a0]" />
+              Saved Billers (1-Tap SOA Check)
+            </span>
+          </div>
+          <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none">
+            {savedBillers.map((sb) => (
+              <button
+                key={sb.id}
+                type="button"
+                onClick={() => handleSelectSavedBiller(sb)}
+                className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-[#092140] border border-[#00e5ff]/30 hover:border-[#00f5a0] transition-all shrink-0 text-left"
+              >
+                <div className="w-8 h-8 rounded-xl bg-[#00e5ff]/15 flex items-center justify-center">
+                  {getBillerIcon(sb.category)}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">{sb.nickname || sb.billerName}</div>
+                  <div className="text-[10px] font-mono text-slate-400">
+                    {sb.billerName} • #{sb.accountNumber}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 1-Tap Scan Bill Statement Banner */}
       <div
@@ -96,6 +230,18 @@ export const PayBillsScreen: React.FC = () => {
           </div>
         </div>
         <ArrowRight className="w-4 h-4 text-[#00e5ff]" />
+      </div>
+
+      {/* Search Bar */}
+      <div className="relative">
+        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search billers (e.g. Meralco, PLDT, Maynilad, SSS, Maya Credit, BDO)..."
+          className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#091f3a] border border-[#00e5ff]/25 text-white text-xs placeholder:text-slate-400 focus:outline-none focus:border-[#00e5ff]"
+        />
       </div>
 
       {/* Category Filter Chips */}
@@ -124,6 +270,7 @@ export const PayBillsScreen: React.FC = () => {
               setActiveBiller(biller);
               setAccountNumber('');
               setAmount('');
+              setBillVerification(null);
               setError(null);
             }}
             className="p-4 flex items-center justify-between hover:border-[#00e5ff]"
@@ -135,9 +282,9 @@ export const PayBillsScreen: React.FC = () => {
               <div>
                 <h4 className="text-sm font-bold text-white">{biller.name}</h4>
                 <p className="text-xs text-slate-400">{biller.description}</p>
-                {biller.fee > 0 && (
-                  <span className="text-[10px] text-slate-400">Fee: ₱{biller.fee.toFixed(2)}</span>
-                )}
+                <span className="text-[10px] text-[#00f5a0] font-semibold">
+                  {biller.fee > 0 ? `Fee: ₱${biller.fee.toFixed(2)}` : 'FREE Processing'} • 24/7 Real-Time Posting
+                </span>
               </div>
             </div>
             <ChevronRight className="w-5 h-5 text-slate-400" />
@@ -145,44 +292,106 @@ export const PayBillsScreen: React.FC = () => {
         ))}
       </div>
 
-      {/* Pay Bill Modal */}
+      {/* Pay Bill Modal with Real-Time Statement Verification */}
       {activeBiller && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-sm rounded-3xl bg-[#081c38] border border-[#00e5ff]/40 p-6 text-white text-left">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-11 h-11 rounded-2xl bg-[#091f3a] border border-[#00e5ff]/30 flex items-center justify-center">
-                {getBillerIcon(activeBiller.category)}
+          <div className="w-full max-w-md rounded-3xl bg-[#081c38] border border-[#00e5ff]/40 p-6 text-white text-left space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-[#091f3a] border border-[#00e5ff]/30 flex items-center justify-center">
+                  {getBillerIcon(activeBiller.category)}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">{activeBiller.name}</h3>
+                  <span className="text-xs text-[#00e5ff] font-medium">
+                    {activeBiller.category} • Code: {activeBiller.code}
+                  </span>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-white">{activeBiller.name}</h3>
-                <span className="text-xs text-[#00e5ff] font-medium">{activeBiller.category}</span>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAccountNumber('1092837465');
+                }}
+                className="text-[11px] font-bold text-[#00f5a0] hover:underline flex items-center gap-1"
+              >
+                <Sparkles className="w-3 h-3" /> Demo Account #
+              </button>
             </div>
 
-            <form onSubmit={handlePay} className="space-y-3.5 mb-5">
-              <div className="flex justify-between text-xs text-slate-400">
-                <span>Available Balance:</span>
-                <span className="font-bold text-[#00e5ff]">
+            <form onSubmit={handlePay} className="space-y-3.5">
+              <div className="flex justify-between text-xs text-slate-400 bg-[#061427] p-2.5 rounded-xl">
+                <span>Available Wallet Balance:</span>
+                <span className="font-bold text-[#00f5a0]">
                   ₱{userProfile.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Account / Reference Number
+                  Account / Customer Reference Number (CAN)
                 </label>
                 <input
                   type="text"
                   value={accountNumber}
                   onChange={(e) => setAccountNumber(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#07172e] border border-[#00e5ff]/30 text-white text-xs focus:outline-none focus:border-[#00e5ff]"
-                  placeholder="e.g. 109283746"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#07172e] border border-[#00e5ff]/30 text-white text-xs font-mono focus:outline-none focus:border-[#00e5ff]"
+                  placeholder="Enter 8-12 digit Account Number (e.g. 1092837465)"
                   required
                 />
               </div>
 
+              {/* Real-Time BancNet Bill Statement Verification Box */}
+              {verifyingBill && (
+                <div className="p-3 rounded-xl bg-[#092140] border border-[#00e5ff]/25 flex items-center gap-2 text-xs text-slate-300">
+                  <Loader2 className="w-4 h-4 text-[#00e5ff] animate-spin" />
+                  <span>Verifying account & statement balance via BancNet Billers API...</span>
+                </div>
+              )}
+
+              {!verifyingBill && billVerification?.verified && (
+                <div className="p-3.5 rounded-2xl bg-[#00f5a0]/10 border border-[#00f5a0]/35 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-[#00f5a0] flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Active Statement Verified
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-300">
+                      Due: {billVerification.dueDate}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-400">Account Holder:</span>
+                    <span className="font-bold text-white">{billVerification.subscriberName}</span>
+                  </div>
+                  <div className="flex justify-between text-xs items-center">
+                    <span className="text-slate-400">Statement Amount Due:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-[#00f5a0]">
+                        ₱{billVerification.statementAmount?.toFixed(2)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          billVerification.statementAmount &&
+                          setAmount(billVerification.statementAmount.toFixed(2))
+                        }
+                        className="text-[10px] px-2 py-0.5 rounded bg-[#00e5ff] text-[#00222b] font-bold"
+                      >
+                        Use Amount
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-slate-400 pt-0.5">
+                    Posting Window: {billVerification.postingWindow}
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Bill Amount</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Bill Payment Amount
+                </label>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-[#00e5ff] font-bold">
                     ₱
@@ -197,11 +406,14 @@ export const PayBillsScreen: React.FC = () => {
                     required
                   />
                 </div>
-                {activeBiller.fee > 0 && (
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Convenience fee: ₱{activeBiller.fee.toFixed(2)}
-                  </p>
-                )}
+                <div className="flex justify-between text-[11px] text-slate-400 mt-1">
+                  <span>Convenience Fee: ₱{activeBiller.fee.toFixed(2)}</span>
+                  {amount && !isNaN(parseFloat(amount)) && (
+                    <span className="font-bold text-white">
+                      Total: ₱{(parseFloat(amount) + activeBiller.fee).toFixed(2)}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {error && <p className="text-xs text-[#ff5252] font-semibold">{error}</p>}
@@ -210,15 +422,16 @@ export const PayBillsScreen: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setActiveBiller(null)}
-                  className="flex-1 py-3 rounded-xl border border-slate-500 text-slate-300 text-xs font-semibold"
+                  className="flex-1 py-3 rounded-xl border border-slate-500 text-slate-300 text-xs font-semibold hover:bg-slate-800"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 rounded-xl bg-[#00e5ff] text-[#00222b] text-xs font-bold hover:bg-[#00f5a0]"
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#00f5a0] to-[#00e5ff] text-[#00222b] text-xs font-black hover:opacity-95 flex items-center justify-center gap-1.5"
                 >
-                  Pay Bill
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Pay Bill Now</span>
                 </button>
               </div>
             </form>

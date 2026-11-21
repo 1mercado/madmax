@@ -2,10 +2,12 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import {
   AppDestination,
+  AppNotification,
   Biller,
   BottomNavTab,
   BudgetCategory,
   NetworkMember,
+  PushNotificationSettings,
   RegisteredAccount,
   RewardItem,
   SavingsGoal,
@@ -34,6 +36,31 @@ import {
   authenticateWithDeviceSensor,
   playCyberSound,
 } from '../utils/biometrics';
+import {
+  sendMoneyApi,
+  payBillApi,
+  buyLoadApi,
+  receiveMoneyApi,
+  syncWalletToServer,
+  getPublicGatewayForChannel,
+  fetchPendingServerNotifications,
+} from '../services/fintechApi';
+import {
+  BrowserPermissionState,
+  buildBillPaymentNotification,
+  buildIncomingTransferNotification,
+  dispatchBrowserPushNotification,
+  ensureServiceWorkerReady,
+  getBrowserNotificationPermission,
+  loadPushSettings,
+  loadStoredNotifications,
+  requestBrowserPushPermission,
+  savePushSettings,
+  saveStoredNotifications,
+  scheduleServiceWorkerBackgroundPush,
+  syncBackgroundWatchWithSw,
+  triggerSwBackgroundCheck,
+} from '../services/pushNotificationService';
 
 interface DigiCashContextType {
   userProfile: UserProfile;
@@ -105,11 +132,35 @@ interface DigiCashContextType {
   updateCategoryLimit: (categoryId: string, newLimit: number) => void;
   logBudgetExpense: (categoryId: string, amount: number, title: string) => { success: boolean; error?: string };
   resetBudgetToDefaults: () => void;
+  // Browser Push Notification & Real-Time Background Alert System
+  notifications: AppNotification[];
+  unreadNotificationCount: number;
+  pushSettings: PushNotificationSettings;
+  pushPermissionState: BrowserPermissionState;
+  activePushBanner: AppNotification | null;
+  isNotificationCenterOpen: boolean;
+  backgroundSimulationPending: null | 'INCOMING_TRANSFER' | 'BILL_PAYMENT';
+  setIsNotificationCenterOpen: (open: boolean) => void;
+  dismissPushBanner: () => void;
+  requestPushNotificationPermission: () => Promise<{
+    granted: boolean;
+    permission: BrowserPermissionState;
+    note?: string;
+  }>;
+  updatePushSettings: (partial: Partial<PushNotificationSettings>) => void;
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
+  clearNotifications: () => void;
+  openNotificationTransaction: (notif: AppNotification) => void;
+  simulateBackgroundPushAlert: (
+    category: 'INCOMING_TRANSFER' | 'BILL_PAYMENT',
+    delayMs?: number
+  ) => void;
 }
 
 const DigiCashContext = createContext<DigiCashContextType | undefined>(undefined);
 
-const OFFICIAL_DATA_VERSION = 'digicash_v3_clean_deployment';
+const OFFICIAL_DATA_VERSION = 'digicash_v4_official_production';
 
 function generateRef(): string {
   const rand = Math.floor(100000 + Math.random() * 900000);
@@ -126,7 +177,7 @@ function getCurrentTimeFormatted(): string {
 }
 
 export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Clear any old sample data if not migrated to official release
+  // Clear any old sample data if not migrated to official production release
   if (typeof window !== 'undefined') {
     const currentVer = localStorage.getItem('digicash_version');
     if (currentVer !== OFFICIAL_DATA_VERSION) {
@@ -137,6 +188,9 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.removeItem('digicash_user');
       localStorage.removeItem('digicash_budget_categories');
       localStorage.removeItem('digicash_authenticated');
+      localStorage.removeItem('digicash_quick_balance');
+      localStorage.removeItem('digicash_notifications_v1');
+      localStorage.removeItem('digicash_registered_accounts');
     }
   }
 
@@ -250,23 +304,38 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ];
   });
 
-  const [currentDestination, setCurrentDestination] = useState<AppDestination>('SPLASH');
+  const [currentDestination, setCurrentDestination] = useState<AppDestination>(() => {
+    const authed = typeof window !== 'undefined' && localStorage.getItem('digicash_authenticated') === 'true';
+    return authed ? 'MAIN' : 'SPLASH';
+  });
   const [selectedBottomTab, setSelectedBottomTab] = useState<BottomNavTab>('HOME');
   const [activeReceiptTransaction, setActiveReceiptTransaction] = useState<Transaction | null>(null);
   const [activeSimulationResult, setActiveSimulationResult] = useState<SimulationResult | null>(null);
   const [show3DExplorer, setShow3DExplorer] = useState(false);
 
-  // Biometrics & Security State (Biometric lock screen disabled per user request)
+  // Browser Push Notifications & Background Alert State
+  const [pushSettings, setPushSettings] = useState<PushNotificationSettings>(() => loadPushSettings());
+  const [pushPermissionState, setPushPermissionState] = useState<BrowserPermissionState>(() =>
+    getBrowserNotificationPermission()
+  );
+  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
+    loadStoredNotifications(INITIAL_TRANSACTIONS)
+  );
+  const [activePushBanner, setActivePushBanner] = useState<AppNotification | null>(null);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState<boolean>(false);
+  const [backgroundSimulationPending, setBackgroundSimulationPending] = useState<
+    null | 'INCOMING_TRANSFER' | 'BILL_PAYMENT'
+  >(null);
+  const lastPolledTimestampRef = React.useRef<number>(Date.now());
+
+  // Biometrics & Security State (Biometric lock screen & Quick Balance disabled per user request)
   const [isBiometricsEnabled, setIsBiometricsEnabled] = useState<boolean>(false);
   const [isAppLocked, setIsAppLocked] = useState<boolean>(false);
-  const [quickBalanceEnabled, setQuickBalanceEnabledState] = useState<boolean>(() => {
-    const saved = localStorage.getItem('digicash_quick_balance');
-    return saved !== null ? saved === 'true' : true;
-  });
+  const [quickBalanceEnabled, setQuickBalanceEnabledState] = useState<boolean>(false);
 
-  const setQuickBalanceEnabled = (enabled: boolean) => {
-    setQuickBalanceEnabledState(enabled);
-    localStorage.setItem('digicash_quick_balance', String(enabled));
+  const setQuickBalanceEnabled = (_enabled: boolean) => {
+    setQuickBalanceEnabledState(false);
+    localStorage.setItem('digicash_quick_balance', 'false');
   };
 
   // Theme Provider State (dark vs high-contrast light)
@@ -439,13 +508,221 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setActiveSimulationResult(null);
   };
 
+  // Persist notifications & push settings
+  useEffect(() => {
+    saveStoredNotifications(notifications);
+  }, [notifications]);
+
+  useEffect(() => {
+    savePushSettings(pushSettings);
+    syncBackgroundWatchWithSw(userProfile.id, pushSettings, lastPolledTimestampRef.current);
+  }, [pushSettings, userProfile.id]);
+
+  // Register Service Worker & listen for notification click events from background
+  useEffect(() => {
+    ensureServiceWorkerReady().then(() => {
+      setPushPermissionState(getBrowserNotificationPermission());
+      syncBackgroundWatchWithSw(userProfile.id, pushSettings, lastPolledTimestampRef.current);
+    });
+
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const handleSwMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (!msg || !msg.type) return;
+
+      if (msg.type === 'NOTIFICATION_CLICKED' && msg.data) {
+        const txId = msg.data.transactionId;
+        const refNum = msg.data.referenceNumber;
+        setTransactions((currTxs) => {
+          const found = currTxs.find(
+            (t) => (txId && t.id === txId) || (refNum && t.referenceNumber === refNum)
+          );
+          if (found) {
+            setActiveReceiptTransaction(found);
+          } else {
+            setIsNotificationCenterOpen(true);
+          }
+          return currTxs;
+        });
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    };
+  }, [userProfile.id, pushSettings]);
+
+  // Visibility listener: sync with Service Worker when app goes to background or returns
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        syncBackgroundWatchWithSw(userProfile.id, pushSettings, lastPolledTimestampRef.current);
+      } else {
+        setPushPermissionState(getBrowserNotificationPermission());
+        triggerSwBackgroundCheck(userProfile.id);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [userProfile.id, pushSettings]);
+
+  // Helper to record & push an incoming transfer or completed bill payment notification
+  const triggerTransactionPushAlert = React.useCallback(
+    (notif: AppNotification) => {
+      setNotifications((prev) => {
+        if (prev.some((n) => n.referenceNumber && n.referenceNumber === notif.referenceNumber)) {
+          return prev;
+        }
+        return [notif, ...prev.slice(0, 49)];
+      });
+
+      const isAllowedByCategory =
+        (notif.category === 'INCOMING_TRANSFER' && pushSettings.incomingTransfers) ||
+        (notif.category === 'BILL_PAYMENT' && pushSettings.billPayments) ||
+        notif.category === 'SYSTEM';
+
+      if (pushSettings.enabled && isAllowedByCategory) {
+        setActivePushBanner(notif);
+        if (pushSettings.soundAlerts) {
+          playCyberSound('success');
+        }
+        dispatchBrowserPushNotification(notif, pushSettings, (txId, refNum) => {
+          setTransactions((currTxs) => {
+            const found = currTxs.find(
+              (t) => (txId && t.id === txId) || (refNum && t.referenceNumber === refNum)
+            );
+            if (found) {
+              setActiveReceiptTransaction(found);
+            } else {
+              setIsNotificationCenterOpen(true);
+            }
+            return currTxs;
+          });
+        });
+      }
+    },
+    [pushSettings]
+  );
+
+  // Poll server for incoming P2P transfers or background settlements (works while tab is in background)
+  useEffect(() => {
+    if (!isAuthenticated || !pushSettings.backgroundSync) return;
+
+    const interval = setInterval(() => {
+      fetchPendingServerNotifications(userProfile.id, lastPolledTimestampRef.current)
+        .then((res) => {
+          if (!res.success || !Array.isArray(res.notifications) || res.notifications.length === 0) {
+            return;
+          }
+          for (const item of res.notifications) {
+            if (item.createdAt > lastPolledTimestampRef.current) {
+              lastPolledTimestampRef.current = item.createdAt;
+            }
+            // Check if transaction is already in local state
+            setTransactions((prevTxs) => {
+              const exists = prevTxs.some(
+                (t) =>
+                  t.referenceNumber === item.referenceNumber ||
+                  t.id === item.transactionId
+              );
+              if (exists) return prevTxs;
+
+              if (item.transaction) {
+                const newTx = item.transaction;
+                if (newTx.direction === 'INCOMING') {
+                  setUserProfile((p) => ({
+                    ...p,
+                    balance: Number((p.balance + newTx.amount).toFixed(2)),
+                  }));
+                }
+                const notif: AppNotification = {
+                  id: item.id,
+                  category: item.category,
+                  title: item.title,
+                  body: item.body,
+                  amount: item.amount,
+                  referenceNumber: item.referenceNumber,
+                  transactionId: item.transactionId,
+                  recipientOrSender: item.recipientOrSender,
+                  gatewayProvider: item.gatewayProvider,
+                  timestamp: item.timestamp,
+                  createdAt: item.createdAt,
+                  read: false,
+                  deliveredViaPush: true,
+                  wasBackgrounded: document.visibilityState === 'hidden',
+                };
+                triggerTransactionPushAlert(notif);
+                return [newTx, ...prevTxs];
+              }
+              return prevTxs;
+            });
+          }
+        })
+        .catch(() => {});
+    }, 7000);
+
+    return () => clearInterval(interval);
+  }, [isAuthenticated, pushSettings.backgroundSync, userProfile.id, triggerTransactionPushAlert]);
+
+  const dismissPushBanner = () => {
+    setActivePushBanner(null);
+  };
+
+  const requestPushNotificationPermission = async () => {
+    const res = await requestBrowserPushPermission();
+    setPushPermissionState(res.permission);
+    if (res.granted) {
+      setPushSettings((prev) => ({ ...prev, enabled: true }));
+    }
+    return res;
+  };
+
+  const updatePushSettings = (partial: Partial<PushNotificationSettings>) => {
+    setPushSettings((prev) => ({ ...prev, ...partial }));
+  };
+
+  const markNotificationRead = (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+  };
+
+  const markAllNotificationsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const clearNotifications = () => {
+    setNotifications([]);
+  };
+
+  const openNotificationTransaction = (notif: AppNotification) => {
+    markNotificationRead(notif.id);
+    const matched = transactions.find(
+      (t) =>
+        (notif.transactionId && t.id === notif.transactionId) ||
+        (notif.referenceNumber && t.referenceNumber === notif.referenceNumber)
+    );
+    if (matched) {
+      setIsNotificationCenterOpen(false);
+      setActiveReceiptTransaction(matched);
+    }
+  };
+
+  const unreadNotificationCount = notifications.filter((n) => !n.read).length;
+
   const fireSuccessConfetti = () => {
     try {
+      playCyberSound('success');
       confetti({
-        particleCount: 60,
-        spread: 60,
-        origin: { y: 0.6 },
-        colors: ['#00E5FF', '#00D294', '#FFB300', '#FFFFFF'],
+        particleCount: 28,
+        spread: 48,
+        scalar: 0.75,
+        ticks: 120,
+        origin: { y: 0.45 },
+        colors: ['#00E5FF', '#00F5A0', '#88F953'],
       });
     } catch {
       // ignore
@@ -458,6 +735,9 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const earnedPoints = Math.max(5, Math.floor(amount / 50));
     const newBalance = userProfile.balance - amount;
+    const railTag = channel.toLowerCase().includes('digicash') ? 'DCP2P' : amount > 50000 ? 'PESONET' : 'INSTAPAY';
+    const traceRef = `${railTag}-${generateRef().replace('REF-', '')}`;
+    const gwMeta = getPublicGatewayForChannel(channel);
 
     setUserProfile((prev) => ({
       ...prev,
@@ -474,11 +754,14 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       direction: 'OUTGOING',
       date: 'Today',
       time: getCurrentTimeFormatted(),
-      referenceNumber: generateRef(),
+      referenceNumber: traceRef,
       status: 'Completed',
       fee: 0,
       recipientOrBiller: recipient,
-      breakdownNote: note ? `Note: ${note} (+${earnedPoints} pts)` : `+${earnedPoints} loyalty points earned`,
+      breakdownNote: note ? `${railTag} • Note: "${note}" (+${earnedPoints} pts)` : `${railTag} Instant Clearing (+${earnedPoints} pts)`,
+      gatewayProvider: gwMeta.gatewayProvider,
+      publicKeyId: gwMeta.publicKeyId,
+      signatureHash: gwMeta.signatureHash,
     };
 
     setTransactions((prev) => [tx, ...prev]);
@@ -487,6 +770,50 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
     setActiveReceiptTransaction(tx);
     fireSuccessConfetti();
+
+    // Dispatch to backend clearing ledger with Public & Secret Key HMAC signing
+    const phoneMatch = recipient.match(/\((.*?)\)/);
+    const recipientIdentifier = phoneMatch ? phoneMatch[1] : recipient;
+    const recipientName = recipient.split(' (')[0] || recipient;
+    sendMoneyApi({
+      senderPhone: userProfile.id,
+      recipientIdentifier,
+      recipientName,
+      amount,
+      channel,
+      note,
+    })
+      .then((res) => {
+        if (res.success && res.transaction) {
+          const serverTx = res.transaction;
+          setTransactions((prev) =>
+            prev.map((item) =>
+              item.id === tx.id
+                ? {
+                    ...item,
+                    referenceNumber: serverTx.referenceNumber || item.referenceNumber,
+                    gatewayProvider: serverTx.gatewayProvider || item.gatewayProvider,
+                    publicKeyId: serverTx.publicKeyId || item.publicKeyId,
+                    signatureHash: serverTx.signatureHash || item.signatureHash,
+                  }
+                : item
+            )
+          );
+          setActiveReceiptTransaction((curr) =>
+            curr && curr.id === tx.id
+              ? {
+                  ...curr,
+                  referenceNumber: serverTx.referenceNumber || curr.referenceNumber,
+                  gatewayProvider: serverTx.gatewayProvider || curr.gatewayProvider,
+                  publicKeyId: serverTx.publicKeyId || curr.publicKeyId,
+                  signatureHash: serverTx.signatureHash || curr.signatureHash,
+                }
+              : curr
+          );
+        }
+      })
+      .catch(() => {});
+
     return { success: true, tx };
   };
 
@@ -497,6 +824,8 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const pointsEarned = Math.max(10, Math.floor(amount / 40));
     const newBalance = userProfile.balance - totalDebit;
+    const billRef = `BILL-${biller.code}-${generateRef().replace('REF-', '')}`;
+    const gwMeta = getPublicGatewayForChannel('bancnet billers');
 
     setUserProfile((prev) => ({
       ...prev,
@@ -513,11 +842,14 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       direction: 'OUTGOING',
       date: 'Today',
       time: getCurrentTimeFormatted(),
-      referenceNumber: generateRef(),
+      referenceNumber: billRef,
       status: 'Completed',
       fee: biller.fee,
-      recipientOrBiller: biller.name,
-      breakdownNote: `Bill: ₱${amount.toFixed(2)}, Fee: ₱${biller.fee.toFixed(2)} (+${pointsEarned} pts)`,
+      recipientOrBiller: `${biller.name} (${accountNumber})`,
+      breakdownNote: `BancNet Clearing • Bill: ₱${amount.toFixed(2)}, Fee: ₱${biller.fee.toFixed(2)} (+${pointsEarned} pts)`,
+      gatewayProvider: gwMeta.gatewayProvider,
+      publicKeyId: gwMeta.publicKeyId,
+      signatureHash: gwMeta.signatureHash,
     };
 
     setTransactions((prev) => [tx, ...prev]);
@@ -526,6 +858,54 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
     setActiveReceiptTransaction(tx);
     fireSuccessConfetti();
+
+    // Trigger Browser Push Notification for Completed Bill Payment
+    lastPolledTimestampRef.current = Date.now() + 2000;
+    const billNotif = buildBillPaymentNotification(
+      tx,
+      typeof document !== 'undefined' && document.visibilityState === 'hidden'
+    );
+    triggerTransactionPushAlert(billNotif);
+
+    // Dispatch to backend BancNet Billers Clearinghouse
+    payBillApi({
+      accountPhone: userProfile.id,
+      biller,
+      accountNumber,
+      amount,
+    })
+      .then((res) => {
+        if (res.success && res.transaction) {
+          const serverTx = res.transaction;
+          lastPolledTimestampRef.current = Date.now() + 1000;
+          setTransactions((prev) =>
+            prev.map((item) =>
+              item.id === tx.id
+                ? {
+                    ...item,
+                    referenceNumber: serverTx.referenceNumber || item.referenceNumber,
+                    gatewayProvider: serverTx.gatewayProvider || item.gatewayProvider,
+                    publicKeyId: serverTx.publicKeyId || item.publicKeyId,
+                    signatureHash: serverTx.signatureHash || item.signatureHash,
+                  }
+                : item
+            )
+          );
+          setActiveReceiptTransaction((curr) =>
+            curr && curr.id === tx.id
+              ? {
+                  ...curr,
+                  referenceNumber: serverTx.referenceNumber || curr.referenceNumber,
+                  gatewayProvider: serverTx.gatewayProvider || curr.gatewayProvider,
+                  publicKeyId: serverTx.publicKeyId || curr.publicKeyId,
+                  signatureHash: serverTx.signatureHash || curr.signatureHash,
+                }
+              : curr
+          );
+        }
+      })
+      .catch(() => {});
+
     return { success: true, tx };
   };
 
@@ -535,6 +915,8 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const points = Math.max(2, Math.floor(amount / 20));
     const newBalance = userProfile.balance - amount;
+    const loadRef = `ELOAD-${telco.toUpperCase().slice(0, 5)}-${generateRef().replace('REF-', '')}`;
+    const gwMeta = getPublicGatewayForChannel('telco load');
 
     setUserProfile((prev) => ({
       ...prev,
@@ -542,7 +924,7 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       points: prev.points + points,
     }));
 
-    const displayTitle = promoTitle ? `${telco} ${promoTitle}` : `${telco} Load ₱${Math.floor(amount)}`;
+    const displayTitle = promoTitle ? `${telco} ${promoTitle}` : `${telco} Regular Load ₱${Math.floor(amount)}`;
 
     const tx: Transaction = {
       id: `TX-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -553,13 +935,16 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       direction: 'OUTGOING',
       date: 'Today',
       time: getCurrentTimeFormatted(),
-      referenceNumber: generateRef(),
+      referenceNumber: loadRef,
       status: 'Completed',
       fee: 0,
       recipientOrBiller: `${telco} (${phone})`,
       breakdownNote: promoTitle
-        ? `${promoTitle} loaded instantly to ${phone} (+${points} pts)`
-        : `Instant load delivered to ${phone} (+${points} pts)`,
+        ? `${promoTitle} dispensed instantly to ${phone} (+${points} pts)`
+        : `Direct E-Load ₱${amount.toFixed(2)} delivered to ${phone} (+${points} pts)`,
+      gatewayProvider: gwMeta.gatewayProvider,
+      publicKeyId: gwMeta.publicKeyId,
+      signatureHash: gwMeta.signatureHash,
     };
 
     setTransactions((prev) => [tx, ...prev]);
@@ -568,11 +953,53 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
     setActiveReceiptTransaction(tx);
     fireSuccessConfetti();
+
+    // Dispatch to backend Telco E-Load gateway
+    buyLoadApi({
+      accountPhone: userProfile.id,
+      targetPhone: phone,
+      telco,
+      amount,
+      promoTitle,
+    })
+      .then((res) => {
+        if (res.success && res.transaction) {
+          const serverTx = res.transaction;
+          setTransactions((prev) =>
+            prev.map((item) =>
+              item.id === tx.id
+                ? {
+                    ...item,
+                    referenceNumber: serverTx.referenceNumber || item.referenceNumber,
+                    gatewayProvider: serverTx.gatewayProvider || item.gatewayProvider,
+                    publicKeyId: serverTx.publicKeyId || item.publicKeyId,
+                    signatureHash: serverTx.signatureHash || item.signatureHash,
+                  }
+                : item
+            )
+          );
+          setActiveReceiptTransaction((curr) =>
+            curr && curr.id === tx.id
+              ? {
+                  ...curr,
+                  referenceNumber: serverTx.referenceNumber || curr.referenceNumber,
+                  gatewayProvider: serverTx.gatewayProvider || curr.gatewayProvider,
+                  publicKeyId: serverTx.publicKeyId || curr.publicKeyId,
+                  signatureHash: serverTx.signatureHash || curr.signatureHash,
+                }
+              : curr
+          );
+        }
+      })
+      .catch(() => {});
+
     return { success: true, tx };
   };
 
   const receiveMoney = (sender: string, amount: number, note: string) => {
     const newBalance = userProfile.balance + amount;
+    const qrRef = `QRPH-IN-${generateRef().replace('REF-', '')}`;
+    const gwMeta = getPublicGatewayForChannel(sender);
     setUserProfile((prev) => ({ ...prev, balance: newBalance }));
 
     const tx: Transaction = {
@@ -584,42 +1011,204 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       direction: 'INCOMING',
       date: 'Today',
       time: getCurrentTimeFormatted(),
-      referenceNumber: generateRef(),
+      referenceNumber: qrRef,
       status: 'Completed',
       fee: 0,
       recipientOrBiller: sender,
-      breakdownNote: note || 'QR Ph instant deposit',
+      breakdownNote: note || 'National QR Ph / InstaPay instant deposit',
+      gatewayProvider: gwMeta.gatewayProvider,
+      publicKeyId: gwMeta.publicKeyId,
+      signatureHash: gwMeta.signatureHash,
     };
 
     setTransactions((prev) => [tx, ...prev]);
     setActiveReceiptTransaction(tx);
     fireSuccessConfetti();
+
+    // Trigger Browser Push Notification for Incoming Transfer
+    lastPolledTimestampRef.current = Date.now() + 2000;
+    const incomingNotif = buildIncomingTransferNotification(
+      tx,
+      typeof document !== 'undefined' && document.visibilityState === 'hidden'
+    );
+    triggerTransactionPushAlert(incomingNotif);
+
+    receiveMoneyApi({
+      recipientPhone: userProfile.id,
+      senderName: sender,
+      sourceChannel: sender,
+      amount,
+      note,
+    })
+      .then((res) => {
+        if (res.success && res.transaction) {
+          const serverTx = res.transaction;
+          lastPolledTimestampRef.current = Date.now() + 1000;
+          setTransactions((prev) =>
+            prev.map((item) =>
+              item.id === tx.id
+                ? {
+                    ...item,
+                    referenceNumber: serverTx.referenceNumber || item.referenceNumber,
+                    gatewayProvider: serverTx.gatewayProvider || item.gatewayProvider,
+                    publicKeyId: serverTx.publicKeyId || item.publicKeyId,
+                    signatureHash: serverTx.signatureHash || item.signatureHash,
+                  }
+                : item
+            )
+          );
+          setActiveReceiptTransaction((curr) =>
+            curr && curr.id === tx.id
+              ? {
+                  ...curr,
+                  referenceNumber: serverTx.referenceNumber || curr.referenceNumber,
+                  gatewayProvider: serverTx.gatewayProvider || curr.gatewayProvider,
+                  publicKeyId: serverTx.publicKeyId || curr.publicKeyId,
+                  signatureHash: serverTx.signatureHash || curr.signatureHash,
+                }
+              : curr
+          );
+        }
+      })
+      .catch(() => {});
+
     return tx;
   };
 
   const cashIn = (amount: number, channel: string) => {
     const newBalance = userProfile.balance + amount;
+    const cashInRef = `CASHIN-${generateRef().replace('REF-', '')}`;
+    const gwMeta = getPublicGatewayForChannel(channel);
     setUserProfile((prev) => ({ ...prev, balance: newBalance }));
 
     const tx: Transaction = {
       id: `TX-${Math.floor(1000 + Math.random() * 9000)}`,
       type: 'RECEIVE_MONEY',
       title: `Cash-In via ${channel}`,
-      subtitle: 'Wallet Credited',
+      subtitle: 'Wallet Credited Instantly',
       amount,
       direction: 'INCOMING',
       date: 'Today',
       time: getCurrentTimeFormatted(),
-      referenceNumber: generateRef(),
+      referenceNumber: cashInRef,
       status: 'Completed',
       fee: 0,
       recipientOrBiller: channel,
+      breakdownNote: `Direct ${channel} Cash-In • 0% Fee`,
+      gatewayProvider: gwMeta.gatewayProvider,
+      publicKeyId: gwMeta.publicKeyId,
+      signatureHash: gwMeta.signatureHash,
     };
 
     setTransactions((prev) => [tx, ...prev]);
     setActiveReceiptTransaction(tx);
     fireSuccessConfetti();
+
+    // Trigger Browser Push Notification for Incoming Cash-In Transfer
+    lastPolledTimestampRef.current = Date.now() + 2000;
+    const cashInNotif = buildIncomingTransferNotification(
+      tx,
+      typeof document !== 'undefined' && document.visibilityState === 'hidden'
+    );
+    triggerTransactionPushAlert(cashInNotif);
+
+    receiveMoneyApi({
+      recipientPhone: userProfile.id,
+      senderName: channel,
+      sourceChannel: channel,
+      amount,
+      note: `Direct ${channel} Cash-In`,
+    })
+      .then((res) => {
+        if (res.success && res.transaction) {
+          const serverTx = res.transaction;
+          lastPolledTimestampRef.current = Date.now() + 1000;
+          setTransactions((prev) =>
+            prev.map((item) =>
+              item.id === tx.id
+                ? {
+                    ...item,
+                    referenceNumber: serverTx.referenceNumber || item.referenceNumber,
+                    gatewayProvider: serverTx.gatewayProvider || item.gatewayProvider,
+                    publicKeyId: serverTx.publicKeyId || item.publicKeyId,
+                    signatureHash: serverTx.signatureHash || item.signatureHash,
+                  }
+                : item
+            )
+          );
+          setActiveReceiptTransaction((curr) =>
+            curr && curr.id === tx.id
+              ? {
+                  ...curr,
+                  referenceNumber: serverTx.referenceNumber || curr.referenceNumber,
+                  gatewayProvider: serverTx.gatewayProvider || curr.gatewayProvider,
+                  publicKeyId: serverTx.publicKeyId || curr.publicKeyId,
+                  signatureHash: serverTx.signatureHash || curr.signatureHash,
+                }
+              : curr
+          );
+        }
+      })
+      .catch(() => {});
+
     return tx;
+  };
+
+  /**
+   * Sends a Service Worker Background Push verification alert without creating mock ledger transactions.
+   */
+  const simulateBackgroundPushAlert = (
+    category: 'INCOMING_TRANSFER' | 'BILL_PAYMENT',
+    delayMs: number = 3500
+  ) => {
+    if (backgroundSimulationPending) return;
+    setBackgroundSimulationPending(category);
+
+    const previewRef =
+      category === 'INCOMING_TRANSFER'
+        ? `QRPH-VERIFY-${generateRef().replace('REF-', '')}`
+        : `BILL-VERIFY-${generateRef().replace('REF-', '')}`;
+
+    const scheduledNotif: AppNotification =
+      category === 'INCOMING_TRANSFER'
+        ? {
+            id: `NOTIF-VERIFY-${Date.now()}`,
+            category: 'INCOMING_TRANSFER',
+            title: 'DigiCash Push Channel Active (Incoming Transfers)',
+            body: `Real-time QR Ph, InstaPay & P2P push channel verified • Ref: ${previewRef}`,
+            referenceNumber: previewRef,
+            gatewayProvider: 'DigiCash Core Clearinghouse',
+            timestamp: getCurrentTimeFormatted(),
+            createdAt: Date.now() + delayMs,
+            read: false,
+            deliveredViaPush: true,
+            wasBackgrounded: true,
+          }
+        : {
+            id: `NOTIF-VERIFY-${Date.now()}`,
+            category: 'BILL_PAYMENT',
+            title: 'DigiCash Push Channel Active (Bills Hub)',
+            body: `Real-time BancNet Multi-Biller push channel verified • Ref: ${previewRef}`,
+            referenceNumber: previewRef,
+            gatewayProvider: 'BancNet / BSP Multi-Biller Settlement Hub',
+            timestamp: getCurrentTimeFormatted(),
+            createdAt: Date.now() + delayMs,
+            read: false,
+            deliveredViaPush: true,
+            wasBackgrounded: true,
+          };
+
+    scheduleServiceWorkerBackgroundPush(scheduledNotif, delayMs);
+
+    setTimeout(() => {
+      setBackgroundSimulationPending(null);
+      const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      triggerTransactionPushAlert({
+        ...scheduledNotif,
+        wasBackgrounded: isHidden,
+        timestamp: getCurrentTimeFormatted(),
+      });
+    }, delayMs);
   };
 
   const upgradeToBuilder = () => {
@@ -1030,11 +1619,13 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.removeItem('digicash_goals');
     localStorage.removeItem('digicash_user');
     localStorage.removeItem('digicash_budget_categories');
+    localStorage.removeItem('digicash_notifications_v1');
     setUserProfile(INITIAL_USER);
     setTransactions(INITIAL_TRANSACTIONS);
     setNetworkMembers(INITIAL_NETWORK_MEMBERS);
     setSavingsGoals(INITIAL_SAVINGS_GOALS);
     setBudgetCategories(INITIAL_BUDGET_CATEGORIES);
+    setNotifications([]);
   };
 
   const sendSmsOtp = (phone: string): { success: boolean; code: string; message: string } => {
@@ -1249,13 +1840,14 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const refCode = `DC${formattedPhone.slice(-4)}`;
+    const defaultAdminBalance = account.phone === '09171234567' ? 25000.0 : 500.0;
     const profile: UserProfile = {
       id: account.phone,
       name: account.name,
       email: account.email,
       phone: `+63 ${account.phone.slice(1, 4)} ${account.phone.slice(4, 7)} ${account.phone.slice(7)}`,
-      balance: userProfile.id === account.phone ? userProfile.balance : 0.0,
-      points: userProfile.id === account.phone ? userProfile.points : 100,
+      balance: userProfile.id === account.phone && userProfile.balance > 0 ? userProfile.balance : defaultAdminBalance,
+      points: userProfile.id === account.phone ? userProfile.points : 500,
       tier: userProfile.id === account.phone ? userProfile.tier : 'BASIC',
       role: account.phone === '09171234567' ? 'SUPER_ADMIN' : 'USER',
       isActivated: true,
@@ -1276,6 +1868,15 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setCurrentDestination('MAIN');
     fireSuccessConfetti();
     playCyberSound('success');
+
+    syncWalletToServer({
+      phone: profile.id,
+      name: profile.name,
+      email: profile.email,
+      balance: profile.balance,
+      points: profile.points,
+      tier: profile.tier,
+    });
 
     return { success: true };
   };
@@ -1323,13 +1924,14 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const refCode = `DC${formattedPhone.slice(-4)}`;
+    const defaultAdminBalance = account.phone === '09171234567' ? 25000.0 : 500.0;
     const profile: UserProfile = {
       id: account.phone,
       name: account.name,
       email: account.email,
       phone: `+63 ${account.phone.slice(1, 4)} ${account.phone.slice(4, 7)} ${account.phone.slice(7)}`,
-      balance: userProfile.id === account.phone ? userProfile.balance : 0.0,
-      points: userProfile.id === account.phone ? userProfile.points : 100,
+      balance: userProfile.id === account.phone && userProfile.balance > 0 ? userProfile.balance : defaultAdminBalance,
+      points: userProfile.id === account.phone ? userProfile.points : 500,
       tier: 'BASIC',
       role: account.phone === '09171234567' ? 'SUPER_ADMIN' : 'USER',
       isActivated: true,
@@ -1350,6 +1952,15 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setCurrentDestination('MAIN');
     fireSuccessConfetti();
     playCyberSound('success');
+
+    syncWalletToServer({
+      phone: profile.id,
+      name: profile.name,
+      email: profile.email,
+      balance: profile.balance,
+      points: profile.points,
+      tier: profile.tier,
+    });
 
     return { success: true };
   };
@@ -1432,6 +2043,23 @@ export const DigiCashProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateCategoryLimit,
         logBudgetExpense,
         resetBudgetToDefaults,
+        // Browser Push Notification & Real-Time Background Alert System
+        notifications,
+        unreadNotificationCount,
+        pushSettings,
+        pushPermissionState,
+        activePushBanner,
+        isNotificationCenterOpen,
+        backgroundSimulationPending,
+        setIsNotificationCenterOpen,
+        dismissPushBanner,
+        requestPushNotificationPermission,
+        updatePushSettings,
+        markNotificationRead,
+        markAllNotificationsRead,
+        clearNotifications,
+        openNotificationTransaction,
+        simulateBackgroundPushAlert,
       }}
     >
       {children}

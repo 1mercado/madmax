@@ -11,11 +11,13 @@ import {
   EyeOff,
   Lock,
   MessageSquare,
+  Moon,
   Phone,
   QrCode,
   RefreshCw,
   ShieldCheck,
   Sparkles,
+  Sun,
   User,
   Users,
   Zap,
@@ -43,6 +45,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     registeredAccounts,
     userProfile,
     quickBalanceEnabled,
+    theme,
+    toggleTheme,
   } = useDigiCash();
 
   const [mode, setMode] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
@@ -330,34 +334,55 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     }
   };
 
-  return (
-    <div className="relative w-full h-full min-h-screen bg-gradient-to-b from-[#01142f] via-[#021e44] to-[#011736] overflow-y-auto flex flex-col justify-between p-4 sm:p-6">
-      {/* Background Graphic */}
-      <div
-        className="absolute inset-0 z-0 bg-cover bg-center opacity-30 pointer-events-none"
-        style={{ backgroundImage: `url('/assets/img_earth_backdrop.jpg')` }}
-      />
+    const isLight = theme === 'light';
 
-      <div className="relative z-10 max-w-md mx-auto w-full my-auto py-4">
-        {/* Top Header */}
-        <div className="flex items-center justify-between mb-6">
-          <button
-            onClick={onBackToSplash}
-            className="p-2.5 rounded-full bg-[#081b36] border border-[#00e5ff]/20 text-white hover:bg-[#0c2a54] transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
+    return (
+      <div className={`relative w-full h-full min-h-screen overflow-y-auto flex flex-col justify-between p-4 sm:p-6 transition-colors duration-200 ${
+        isLight ? 'bg-slate-100 text-[#090d16]' : 'bg-gradient-to-b from-[#01142f] via-[#021e44] to-[#011736] text-white'
+      }`}>
+        {/* Background Graphic */}
+        <div
+          className={`absolute inset-0 z-0 bg-cover bg-center pointer-events-none transition-opacity ${
+            isLight ? 'opacity-10 mix-blend-multiply' : 'opacity-30'
+          }`}
+          style={{ backgroundImage: `url('/assets/img_earth_backdrop.jpg')` }}
+        />
 
-          <div className="flex items-center gap-2">
-            <DigiCashLogo size={32} showGlow={true} />
-            <div className="flex items-center text-lg font-bold">
-              <span className="text-white">Digi</span>
-              <span className="text-[#00f5a0]">Cash</span>
+        <div className="relative z-10 max-w-md mx-auto w-full my-auto py-4">
+          {/* Top Header */}
+          <div className="flex items-center justify-between mb-6">
+            <button
+              onClick={onBackToSplash}
+              className={`p-2.5 rounded-full border transition-colors ${
+                isLight
+                  ? 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50 shadow-sm'
+                  : 'bg-[#081b36] border-[#00e5ff]/20 text-white hover:bg-[#0c2a54]'
+              }`}
+              title="Back to Splash"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2">
+              <DigiCashLogo size={32} showGlow={true} />
+              <div className="flex items-center text-lg font-bold">
+                <span className={isLight ? 'text-slate-900' : 'text-white'}>Digi</span>
+                <span className="text-[#00f5a0]">Cash</span>
+              </div>
             </div>
-          </div>
 
-          <div className="w-10" />
-        </div>
+            <button
+              onClick={toggleTheme}
+              className={`p-2.5 rounded-full border transition-colors ${
+                isLight
+                  ? 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50 shadow-sm'
+                  : 'bg-[#081b36] border-[#00e5ff]/20 text-amber-300 hover:bg-[#0c2a54]'
+              }`}
+              title={isLight ? 'Switch to Dark Theme' : 'Switch to Light Theme'}
+            >
+              {isLight ? <Moon className="w-4 h-4 text-indigo-600" /> : <Sun className="w-4 h-4 text-amber-400" />}
+            </button>
+          </div>
 
         {/* Mode Selector Tabs */}
         <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-[#071933] border border-[#00e5ff]/25 mb-5 shadow-lg">

@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
+  Bell,
   CreditCard,
   Eye,
   EyeOff,
@@ -43,14 +44,14 @@ export const HomeScreen: React.FC = () => {
     navigateTo,
     setBottomTab,
     openReceipt,
-    quickBalanceEnabled,
-    setQuickBalanceEnabled,
     theme,
     toggleTheme,
+    unreadNotificationCount,
+    setIsNotificationCenterOpen,
+    pushSettings,
   } = useDigiCash();
 
   const [isBalanceHidden, setIsBalanceHidden] = useState(false);
-  const [quickBalanceFeedback, setQuickBalanceFeedback] = useState<string | null>(null);
   const [selectedActivityFilter, setSelectedActivityFilter] = useState('All');
   const [showCashInModal, setShowCashInModal] = useState(false);
   const [customCashInAmount, setCustomCashInAmount] = useState('1000');
@@ -115,6 +116,27 @@ export const HomeScreen: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Browser Push Notification Center Bell */}
+          <button
+            onClick={() => setIsNotificationCenterOpen(true)}
+            className={`relative p-2 rounded-full border transition-all ${
+              theme === 'light'
+                ? 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50'
+                : 'bg-[#0f2647] border-[#00e5ff]/35 text-[#00e5ff] hover:bg-[#143460]'
+            }`}
+            title="Browser Push Notifications & Background Alerts"
+          >
+            <Bell className="w-4 h-4" />
+            {unreadNotificationCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-[#00f5a0] text-[#00222b] text-[9px] font-black flex items-center justify-center shadow">
+                {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+              </span>
+            )}
+            {pushSettings.enabled && unreadNotificationCount === 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#00f5a0]" />
+            )}
+          </button>
+
           {/* Quick Theme Toggle */}
           <button
             onClick={toggleTheme}
@@ -162,27 +184,6 @@ export const HomeScreen: React.FC = () => {
               className="text-[#00e5ff] hover:text-white"
             >
               {isBalanceHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={() => {
-                const next = !quickBalanceEnabled;
-                setQuickBalanceEnabled(next);
-                setQuickBalanceFeedback(
-                  next
-                    ? 'Quick Balance enabled! You can now peek balance on the login screen without entering your MPIN.'
-                    : 'Quick Balance disabled. Full authentication now required.'
-                );
-                setTimeout(() => setQuickBalanceFeedback(null), 3500);
-              }}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all ${
-                quickBalanceEnabled
-                  ? 'bg-[#00f5a0]/15 border-[#00f5a0]/50 text-[#00f5a0]'
-                  : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
-              }`}
-              title="Quick Balance: View balance without MPIN on login screen"
-            >
-              <Zap className="w-3 h-3 text-[#00f5a0]" />
-              <span>Quick Balance: {quickBalanceEnabled ? 'ON' : 'OFF'}</span>
             </button>
           </div>
 
@@ -269,90 +270,6 @@ export const HomeScreen: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Quick Balance Toggle & Security Card */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-[#072142] via-[#092a54] to-[#061c38] border border-[#00e5ff]/30 shadow-lg backdrop-blur-md">
-        <div className="flex items-center justify-between">
-          <div className="flex items-start gap-3">
-            <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
-                quickBalanceEnabled
-                  ? 'bg-[#00f5a0]/20 text-[#00f5a0] border-[#00f5a0]/40 shadow-[0_0_15px_rgba(0,245,160,0.25)]'
-                  : 'bg-slate-800 text-slate-400 border-slate-700'
-              }`}
-            >
-              <Eye className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="text-xs sm:text-sm font-bold text-white">Quick Balance</h4>
-                <span
-                  className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase ${
-                    quickBalanceEnabled
-                      ? 'bg-[#00f5a0]/20 text-[#00f5a0] border border-[#00f5a0]/40'
-                      : 'bg-slate-800 text-slate-400 border border-slate-700'
-                  }`}
-                >
-                  {quickBalanceEnabled ? 'Active' : 'Off'}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-300 mt-0.5 leading-snug">
-                View your account balance on the Login/Lock screen without needing to enter your MPIN or full password.
-              </p>
-            </div>
-          </div>
-
-          {/* Toggle Switch */}
-          <button
-            type="button"
-            onClick={() => {
-              const next = !quickBalanceEnabled;
-              setQuickBalanceEnabled(next);
-              setQuickBalanceFeedback(
-                next
-                  ? 'Quick Balance enabled! You can now peek your balance on the login screen without entering your MPIN.'
-                  : 'Quick Balance disabled. Full MPIN authentication is now required.'
-              );
-              setTimeout(() => setQuickBalanceFeedback(null), 4000);
-            }}
-            className={`relative inline-flex h-6 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-              quickBalanceEnabled ? 'bg-[#00f5a0]' : 'bg-slate-700'
-            }`}
-            role="switch"
-            aria-checked={quickBalanceEnabled}
-            title="Toggle Quick Balance"
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out ${
-                quickBalanceEnabled ? 'translate-x-6 bg-[#00222b]' : 'translate-x-0 bg-white'
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* Live Status Description */}
-        <div className="mt-3 pt-2.5 border-t border-[#00e5ff]/15 flex items-center justify-between text-[11px]">
-          <div className="flex items-center gap-1.5 text-slate-300">
-            <span className={`w-2 h-2 rounded-full ${quickBalanceEnabled ? 'bg-[#00f5a0] animate-pulse' : 'bg-slate-500'}`} />
-            <span>
-              {quickBalanceEnabled
-                ? 'Balance glanceable on pre-login lock screen'
-                : 'Locked • MPIN required to view balance'}
-            </span>
-          </div>
-          <span className="text-[10px] text-[#00e5ff] font-semibold">
-            {quickBalanceEnabled ? '₱' + userProfile.balance.toLocaleString() : 'Hidden'}
-          </span>
-        </div>
-
-        {/* Feedback message banner */}
-        {quickBalanceFeedback && (
-          <div className="mt-2.5 p-2 rounded-xl bg-[#00e5ff]/15 border border-[#00e5ff]/40 text-[#00e5ff] text-xs flex items-center gap-2 animate-in fade-in">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00e5ff] animate-ping shrink-0" />
-            <span>{quickBalanceFeedback}</span>
-          </div>
-        )}
       </div>
 
       {/* 3. Quick Actions Section */}

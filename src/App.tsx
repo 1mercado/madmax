@@ -20,6 +20,10 @@ import { BudgetPlannerScreen } from './components/screens/BudgetPlannerScreen';
 import { BottomNavigation } from './components/layout/BottomNavigation';
 import { TransactionReceiptModal } from './components/common/TransactionReceiptModal';
 import { SimulationResultModal } from './components/common/SimulationResultModal';
+import {
+  NotificationCenterModal,
+  PushNotificationBanner,
+} from './components/common/NotificationCenterModal';
 
 const AppContent: React.FC = () => {
   const {
@@ -30,22 +34,24 @@ const AppContent: React.FC = () => {
     dismissReceipt,
     activeSimulationResult,
     dismissSimulation,
+    isAuthenticated,
     theme,
     toggleTheme,
   } = useDigiCash();
 
-  // Render active destination
+  // Render active destination (Always show DigiCash Splash Screen when no one is logged in)
   const renderScreen = () => {
+    if (!isAuthenticated || currentDestination === 'SPLASH' || currentDestination === 'LOGIN') {
+      return (
+        <SplashScreen
+          onLoginSuccess={() => navigateTo('MAIN')}
+          onGetStarted={() => navigateTo('MAIN')}
+          onLoginClick={() => navigateTo('MAIN')}
+        />
+      );
+    }
+
     switch (currentDestination) {
-      case 'SPLASH':
-      case 'LOGIN':
-        return (
-          <SplashScreen
-            onLoginSuccess={() => navigateTo('MAIN')}
-            onGetStarted={() => navigateTo('MAIN')}
-            onLoginClick={() => navigateTo('MAIN')}
-          />
-        );
       case 'SEND_MONEY':
         return <SendMoneyScreen />;
       case 'RECEIVE_MONEY':
@@ -87,6 +93,7 @@ const AppContent: React.FC = () => {
   };
 
   const isSplashOrScanner =
+    !isAuthenticated ||
     currentDestination === 'SPLASH' ||
     currentDestination === 'LOGIN' ||
     currentDestination === 'QR_SCANNER';
@@ -179,7 +186,10 @@ const AppContent: React.FC = () => {
         {/* Persistent Bottom Bar for Navigation */}
         <BottomNavigation />
 
-        {/* Global Modals */}
+        {/* Global Modals & Browser Push Notification Banner */}
+        <PushNotificationBanner />
+        <NotificationCenterModal />
+
         <TransactionReceiptModal
           transaction={activeReceiptTransaction}
           onDismiss={dismissReceipt}

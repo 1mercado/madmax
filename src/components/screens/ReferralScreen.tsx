@@ -135,7 +135,7 @@ export const ReferralScreen: React.FC = () => {
         className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#00f5a0] to-[#00e5ff] text-[#00222b] font-bold text-xs shadow-lg shadow-[#00e5ff]/20 hover:opacity-95 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
       >
         <UserPlus className="w-4 h-4" />
-        <span>Enroll Downline Member (Test 60/40 Split & Levels)</span>
+        <span>Register Downline Partner</span>
       </button>
 
       {/* Builder Upgrade Callout if Basic */}
@@ -265,7 +265,7 @@ export const ReferralScreen: React.FC = () => {
                   type="text"
                   value={memberName}
                   onChange={(e) => setMemberName(e.target.value)}
-                  placeholder="e.g. Roberto Silva"
+                  placeholder="Enter partner full name"
                   className="w-full px-3.5 py-2 rounded-xl bg-[#07172e] border border-[#00e5ff]/30 text-white text-xs focus:outline-none focus:border-[#00e5ff]"
                   required
                 />

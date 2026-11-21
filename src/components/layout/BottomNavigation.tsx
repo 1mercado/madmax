@@ -4,10 +4,11 @@ import { useDigiCash } from '../../context/DigiCashContext';
 import { BottomNavTab } from '../../types';
 
 export const BottomNavigation: React.FC = () => {
-  const { selectedBottomTab, setBottomTab, currentDestination, theme } = useDigiCash();
+  const { selectedBottomTab, setBottomTab, currentDestination, isAuthenticated, theme } = useDigiCash();
 
-  // Hide bottom nav on full-screen flows (Splash, Login, Scanner)
+  // Hide bottom nav when not logged in or on full-screen flows (Splash, Login, Scanner)
   if (
+    !isAuthenticated ||
     currentDestination === 'SPLASH' ||
     currentDestination === 'LOGIN' ||
     currentDestination === 'QR_SCANNER'

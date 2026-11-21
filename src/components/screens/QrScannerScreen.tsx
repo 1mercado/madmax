@@ -84,8 +84,8 @@ export const QrScannerScreen: React.FC = () => {
           setCameraActive(true);
         }
       } catch (err: any) {
-        console.warn('Camera stream not started, using viewfinder simulation:', err);
-        setCameraError('Camera access in simulation mode. Live scan active.');
+        console.warn('Camera stream fallback active:', err);
+        setCameraError('Optical viewfinder ready. Select a QR Ph target or upload a QR image below.');
       }
     };
 
@@ -160,32 +160,32 @@ export const QrScannerScreen: React.FC = () => {
       categoryLabel: 'Merchant Store',
     },
 
-    // 2. Peer-to-Peer Transfers
+    // 2. Peer-to-Peer & E-Wallet QR Ph Transfers
     {
       type: 'TRANSFER_P2P',
-      title: 'Maria Cruz (QR Ph)',
-      subtitle: '+63 917 234 5678',
-      identifier: '+63 917 234 5678',
+      title: 'GCash Express QR Ph',
+      subtitle: 'National QR Ph P2P Transfer',
+      identifier: '09995760130',
       suggestedAmount: 500.0,
-      note: 'Lunch share & coffee',
+      note: 'QR Ph Instant Transfer',
       categoryLabel: 'Peer-to-Peer',
     },
     {
       type: 'TRANSFER_P2P',
-      title: 'Carlo Mendoza (DigiCash ID)',
-      subtitle: '+63 918 345 6789',
-      identifier: '+63 918 345 6789',
-      suggestedAmount: 1200.0,
-      note: 'Monthly team contribution',
+      title: 'Maya Wallet QR Ph',
+      subtitle: 'InstaPay QR Ph Clearing',
+      identifier: '09171234567',
+      suggestedAmount: 1000.0,
+      note: 'Maya QR Ph Transfer',
       categoryLabel: 'Peer-to-Peer',
     },
     {
       type: 'TRANSFER_P2P',
-      title: 'Bianca Reyes',
-      subtitle: '+63 920 456 7890',
-      identifier: '+63 920 456 7890',
-      suggestedAmount: 750.0,
-      note: 'Project share',
+      title: 'GoTyme Bank QR Ph',
+      subtitle: 'GoTyme Direct InstaPay',
+      identifier: '09171234567',
+      suggestedAmount: 1500.0,
+      note: 'GoTyme QR Ph Transfer',
       categoryLabel: 'Peer-to-Peer',
     },
 

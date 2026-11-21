@@ -1,0 +1,15 @@
+{
+  "accounts": {
+    "09171234567": {
+      "phone": "09171234567",
+      "name": "Super Admin",
+      "email": "superadmin@digicash.ph",
+      "balance": 25000,
+      "points": 500,
+      "tier": "BASIC",
+      "updatedAt": "2026-11-04T22:58:00.000Z"
+    }
+  },
+  "transactions": {},
+  "savedBillers": {}
+}
